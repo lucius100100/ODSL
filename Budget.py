@@ -1,0 +1,409 @@
+#%%
+
+# Import packages
+import pandas as pd
+import numpy as np
+import xarray as xr
+import xesmf as xe
+import os
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import matplotlib_inline.backend_inline
+matplotlib_inline.backend_inline.set_matplotlib_formats('retina')
+
+#%%
+
+# Configuration
+duacs_dir = r'C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\Altimetry\\'
+budget_dir = r'C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\Budget\Frederikse\\'
+gia_dir = r'C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\Budget\GIA\\'
+fig_dir = './figures/'
+if not os.path.exists(fig_dir):
+    os.makedirs(fig_dir)
+
+#period following Richter et al. 2017
+start_year = 1993
+end_year = 2012
+
+#function for rotating longitude
+def rotate_longitude(ds, name_lon):
+    """Convert longitude from 0-360 to -180-180 coordinate system"""
+    ds_copy = ds.copy()
+    new_lon_values = (((ds_copy[name_lon] + 180) % 360) - 180)
+    ds_copy = ds_copy.assign_coords({name_lon: new_lon_values})
+    return ds_copy.sortby(ds_copy[name_lon])
+
+#%%
+
+# Altimetry data
+print("Loading altimetry data...")
+duacs_ds = xr.open_mfdataset(f'{duacs_dir}cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1M-m_*.nc', combine='by_coords').load()
+duacs_ds = rotate_longitude(duacs_ds, 'longitude')
+duacs_ds['sla'] *= 100  #m to cm
+duacs_yearly = duacs_ds.groupby('time.year').mean()
+
+print(f"Altimetry range: {duacs_yearly.sla.min().item():.2f} to {duacs_yearly.sla.max().item():.2f} cm/yr")
+
+#%%
+
+# Frederikse budget
+print("Loading Frederikse budget data...")
+ds_frederikse = xr.open_dataset(f'{budget_dir}total.nc')
+
+#geocentric sea level = RSL + RAD
+rsl_component = ds_frederikse['total_rsl_mean']  #Relative Sea Level (RSL)          [mm]
+vlm_component = ds_frederikse['total_rad_mean']  #RAD or Vertical Land Motion (VLM) [mm]
+asl_frederikse = rsl_component + vlm_component   #geocentric sea level
+
+#rotate and standardize coordinates
+asl_frederikse = rotate_longitude(asl_frederikse, 'lon')
+asl_frederikse = asl_frederikse.rename({'lon': 'longitude', 'lat': 'latitude', 'time': 'year'})
+
+print(f"Geocentric sea level range: {asl_frederikse.min().item():.2f} to {asl_frederikse.max().item():.2f} cm/yr")
+
+#%%
+
+# GIA 
+print("Loading GIA data...")
+gia_rad = xr.open_dataset(f'{gia_dir}drad.1grid_O512.nc')
+gia_sea = xr.open_dataset(f'{gia_dir}dsea.1grid_O512.nc')
+
+#process
+gia_rad_da = gia_rad['Drad_250']  # [mm/yr]
+gia_sea_da = gia_sea['Dsea_250']  # [mm/yr]
+
+#standardize coordinate names and rotate longitude
+gia_rad_da = gia_rad_da.rename({'Lon': 'longitude', 'Lat': 'latitude'})
+gia_sea_da = gia_sea_da.rename({'Lon': 'longitude', 'Lat': 'latitude'})
+gia_rad_da = rotate_longitude(gia_rad_da, 'longitude')
+gia_sea_da = rotate_longitude(gia_sea_da, 'longitude')
+
+print(f"GIA rad range: {gia_rad_da.min().item():.2f} to {gia_rad_da.max().item():.2f} mm/yr")
+print(f"GIA sea range: {gia_sea_da.min().item():.2f} to {gia_sea_da.max().item():.2f} mm/yr")
+
+#%%
+
+# Calculations
+
+#common years
+year_slice = slice(start_year, end_year)
+alt_years = duacs_yearly.sel(year=year_slice).year.values
+fr_years = asl_frederikse.sel(year=year_slice).year.values
+common_years = np.intersect1d(alt_years, fr_years)
+
+print(f"Analysis period: {common_years.min()}-{common_years.max()} ({len(common_years)} years)")
+
+#calculate trends over common period
+trend_sla_alt = duacs_yearly.sla.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1)    #MSL proxy   (cm/yr)
+trend_asl_fr = asl_frederikse.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1)       #geoid proxy (mm/yr)
+
+#%%
+
+# Regridding using xESMF
+print("Creating regridders...")
+regridder_frederikse = xe.Regridder(trend_asl_fr, trend_sla_alt, 'bilinear', periodic=True)
+regridder_gia = xe.Regridder(gia_rad_da, trend_sla_alt, 'bilinear', periodic=True)
+
+#regrid to altimetry grid
+print("Regridding Frederikse budget trend...")
+trend_asl_fr_regridded = regridder_frederikse(trend_asl_fr)
+print("Regridding GIA data...")
+gia_rad_regridded = regridder_gia(gia_rad_da)
+gia_sea_regridded = regridder_gia(gia_sea_da)
+gia_geoid_correction_mm_yr = gia_sea_regridded - gia_rad_regridded
+
+#convert components to mm/yr
+print("Converting all trends to mm/yr...")
+#altimetry MSL (cm/yr -> mm/yr)
+trend_sla_alt_mm_yr = trend_sla_alt * 10
+#Frederikse geoid trend (is already mm/yr)
+trend_asl_fr_regridded_mm_yr = trend_asl_fr_regridded
+gia_regridded_mm_yr = gia_geoid_correction_mm_yr
+
+#calculate ODSL (mm/yr)
+print("Calculating ODSL...")
+odsl_mm_yr = trend_sla_alt_mm_yr - trend_asl_fr_regridded_mm_yr - gia_regridded_mm_yr
+
+print(f"ODSL range: {odsl_mm_yr.min().item():.1f} to {odsl_mm_yr.max().item():.1f} mm/yr")
+
+#clean up regridder
+print("Cleaning up regridder...")
+try:
+    regridder_frederikse.clean_weight_file()
+    regridder_gia.clean_weight_file()
+except AttributeError:
+    #older version of xESMF, cleanup happens automatically
+    pass
+
+#%%
+
+# Plotting ODSL and components
+fig, axes = plt.subplots(
+    nrows=2,
+    ncols=2,
+    figsize=(18, 9),
+    subplot_kw={'projection': ccrs.PlateCarree()}
+) 
+ax1, ax2 = axes[0]
+ax3, ax4 = axes[1]
+
+#region mask for regionwide statistics
+def create_region_mask(data_array, extent):
+    """Create a mask for the North Atlantic region"""
+    lon_min, lon_max, lat_min, lat_max = extent
+    mask = ((data_array.longitude >= lon_min) & 
+            (data_array.longitude <= lon_max) & 
+            (data_array.latitude >= lat_min) & 
+            (data_array.latitude <= lat_max))
+    return mask
+
+#North Atlantic Ocean extent following Richter et al. 2017 figure 2
+extent = [-65, 35, 50, 80]
+region_mask = create_region_mask(trend_sla_alt_mm_yr, extent)
+
+#calculate statistics
+def calculate_regional_stats(data_array, mask):
+    """Calculate mean and RMS for the masked region"""
+    masked_data = data_array.where(mask)
+    regional_mean = masked_data.mean(skipna=True).item()
+    regional_rms = np.sqrt((masked_data**2).mean(skipna=True)).item()
+    return regional_mean, regional_rms
+
+msl_mean, msl_rms = calculate_regional_stats(trend_sla_alt_mm_yr, region_mask)
+geoid_mean, geoid_rms = calculate_regional_stats(trend_asl_fr_regridded_mm_yr, region_mask)
+gia_mean, gia_rms = calculate_regional_stats(gia_regridded_mm_yr, region_mask)
+odsl_mean, odsl_rms = calculate_regional_stats(odsl_mm_yr, region_mask)
+
+#North Atlantic Ocean projection following Richter et al. 2017 figure 2
+proj = ccrs.PlateCarree()
+
+#colormap
+vmax_components = max(abs(trend_sla_alt_mm_yr.quantile(0.02)), abs(trend_sla_alt_mm_yr.quantile(0.98)),
+                    abs(trend_asl_fr_regridded_mm_yr.quantile(0.02)), abs(trend_asl_fr_regridded_mm_yr.quantile(0.98)))
+
+#shared colorbar layout
+gs = gridspec.GridSpec(2, 2, hspace=0.05, wspace=0.02)
+
+#same map features for all subplots
+def add_map_features(ax, is_left=False, is_bottom=False):
+    """Add standard map features"""
+    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    ax.add_feature(cfeature.LAND, color='lightgray', zorder=1)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
+    gl = ax.gridlines(draw_labels=True, alpha=0.3, dms=True, x_inline=False, y_inline=False)
+    gl.top_labels = gl.right_labels = False
+    gl.left_labels = is_left
+    gl.bottom_labels = is_bottom
+
+#subplot 1: MSL (Altimetry SLA)
+im1 = ax1.pcolormesh(trend_sla_alt_mm_yr.longitude, trend_sla_alt_mm_yr.latitude, 
+                     trend_sla_alt_mm_yr, transform=ccrs.PlateCarree(), 
+                     cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
+add_map_features(ax1, is_left=True, is_bottom=True)
+ax1.set_title(f'MSL\n(Trend altimetry SLA)\nMean: {msl_mean:.1f} mm/yr, RMS: {msl_rms:.1f} mm/yr', 
+              fontsize=11, pad=10)
+
+#subplot 2: Geoid (Frederikse ASL change)
+im2 = ax2.pcolormesh(trend_asl_fr_regridded_mm_yr.longitude, trend_asl_fr_regridded_mm_yr.latitude,
+                     trend_asl_fr_regridded_mm_yr, transform=ccrs.PlateCarree(), 
+                     cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
+add_map_features(ax2, is_left=True, is_bottom=True)
+ax2.set_title(f'Geoid\n(Frederikse ASL trend)\nMean: {geoid_mean:.1f} mm/yr, RMS: {geoid_rms:.1f} mm/yr', 
+              fontsize=11, pad=10)
+
+#subplot 3: GIA regridded
+im3 = ax3.pcolormesh(gia_regridded_mm_yr.longitude, gia_regridded_mm_yr.latitude,
+                     gia_regridded_mm_yr, transform=ccrs.PlateCarree(), 
+                     cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
+add_map_features(ax3, is_left=True, is_bottom=True)
+ax3.set_title(f'GIA (sea - rad)\nMean: {gia_mean:.1f} mm/yr, RMS: {gia_rms:.1f} mm/yr', 
+              fontsize=11, pad=10)
+
+#subplot 4: ODSL result (with GIA correction)
+im4 = ax4.pcolormesh(odsl_mm_yr.longitude, odsl_mm_yr.latitude,
+                     odsl_mm_yr, transform=ccrs.PlateCarree(), 
+                     cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
+add_map_features(ax4, is_left=True, is_bottom=True)
+ax4.set_title(f'Ocean Dynamic Sea Level\n(MSL - Geoid - GIA)\nMean: {odsl_mean:.1f} mm/yr, RMS: {odsl_rms:.1f} mm/yr', 
+              fontsize=11, pad=10)
+
+#single colorbar for all subplots
+cbar_ax = fig.add_axes([0.2, 0.08, 0.6, 0.025])
+cbar = fig.colorbar(im1, cax=cbar_ax, orientation='horizontal', pad=0.02)
+cbar.set_label('Sea level trend (mm/yr)', fontsize=14)
+cbar.ax.tick_params(labelsize=12)
+
+#figure layout
+plt.suptitle(f'Ocean Dynamic Sea Level Analysis ({common_years.min()}-{common_years.max()})', 
+             fontsize=16, fontweight='bold', y=0.98)
+fig.subplots_adjust(left=0.05, right=0.95, bottom=0.15, top=0.88, hspace=0.1, wspace=0.1)
+
+#save figure
+fig_path = os.path.join(fig_dir, f'ODSL_with_GIA_{common_years.min()}_{common_years.max()}.png')
+plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+plt.show()
+
+print(f"Comprehensive ODSL figure with GIA saved to: {fig_path}")
+
+#%%
+
+# Summary
+print("\n=== ODSL Analysis Summary (with GIA) ===")
+print(f"Analysis period: {common_years.min()}-{common_years.max()}")
+print(f"MSL proxy (Altimetry SLA) range: {trend_sla_alt_mm_yr.min().item():.1f} to {trend_sla_alt_mm_yr.max().item():.1f} mm/yr")
+print(f"Geoid proxy (Frederikse ASL) range: {trend_asl_fr_regridded_mm_yr.min().item():.1f} to {trend_asl_fr_regridded_mm_yr.max().item():.1f} mm/yr")
+print(f"GIA radial component range: {gia_rad_regridded.min().item():.1f} to {gia_rad_regridded.max().item():.1f} mm/yr")
+print(f"GIA sea component range: {gia_sea_regridded.min().item():.1f} to {gia_sea_regridded.max().item():.1f} mm/yr")
+print(f"ODSL range (with GIA): {odsl_mm_yr.min().item():.1f} to {odsl_mm_yr.max().item():.1f} mm/yr")
+print(f"ODSL global mean (with GIA): {odsl_mm_yr.mean().item():.1f} mm/yr")
+print("\n=== Regional Statistics (North Atlantic) ===")
+print(f"MSL mean: {msl_mean:.1f} mm/yr, RMS: {msl_rms:.1f} mm/yr")
+print(f"Geoid mean: {geoid_mean:.1f} mm/yr, RMS: {geoid_rms:.1f} mm/yr")
+print(f"GIA mean: {gia_mean:.1f} mm/yr, RMS: {gia_rms:.1f} mm/yr")
+print(f"ODSL mean: {odsl_mean:.1f} mm/yr, RMS: {odsl_rms:.1f} mm/yr")
+
+#%%
+
+# Plotting GIA components
+print("Generating plot...")
+fig, (ax1, ax2) = plt.subplots(
+    nrows=1,
+    ncols=2,
+    figsize=(18, 7), 
+    subplot_kw={'projection': ccrs.PlateCarree()}
+)
+
+extent = [-65, 35, 50, 80]
+region_mask = create_region_mask(gia_rad_regridded, extent)
+rad_mean, rad_rms = calculate_regional_stats(gia_rad_regridded, region_mask)
+sea_mean, sea_rms = calculate_regional_stats(gia_sea_regridded, region_mask)
+
+vmax = np.nanmax([np.abs(gia_rad_regridded), np.abs(gia_sea_regridded)])
+vmin = -vmax
+
+def add_map_features(ax, is_left=False, is_bottom=False):
+    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    ax.add_feature(cfeature.LAND, color='lightgray', zorder=1)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
+    gl = ax.gridlines(draw_labels=True, alpha=0.3, dms=True, x_inline=False, y_inline=False)
+    gl.top_labels = gl.right_labels = False
+    gl.left_labels = is_left
+    gl.bottom_labels = is_bottom
+
+#subplot 1: GIA rad
+im1 = ax1.pcolormesh(gia_rad_regridded.longitude, gia_rad_regridded.latitude,
+                     gia_rad_regridded, transform=ccrs.PlateCarree(),
+                     cmap='RdBu_r', vmin=vmin, vmax=vmax, shading='auto')
+add_map_features(ax1, is_left=True, is_bottom=True)
+ax1.set_title(f'GIA: Radial Displacement (rad)\nMean: {rad_mean:.1f} mm/yr, RMS: {rad_rms:.1f} mm/yr', fontsize=12)
+
+#subplot 2: GIA sea
+im2 = ax2.pcolormesh(gia_sea_regridded.longitude, gia_sea_regridded.latitude,
+                     gia_sea_regridded, transform=ccrs.PlateCarree(),
+                     cmap='RdBu_r', vmin=vmin, vmax=vmax, shading='auto')
+add_map_features(ax2, is_left=False, is_bottom=True)
+ax2.set_title(f'GIA: Geoid Height Change (sea)\nMean: {sea_mean:.1f} mm/yr, RMS: {sea_rms:.1f} mm/yr', fontsize=12)
+
+fig.subplots_adjust(left=0.04, right=0.96, bottom=0.2, top=0.85, wspace=0.07)
+cbar_ax = fig.add_axes([0.25, 0.1, 0.5, 0.03]) 
+cbar = fig.colorbar(im1, cax=cbar_ax, orientation='horizontal')
+cbar.set_label('GIA Rate (mm/yr)', fontsize=14)
+cbar.ax.tick_params(labelsize=12)
+
+fig.suptitle('GIA components: Rate of change of Radial displacement at time=now vs Rate of change of RSL at time=now.',
+             fontsize=18, fontweight='bold', y=0.95)
+
+fig_path = os.path.join(fig_dir, 'GIA_components_comparison.png')
+plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+plt.show()
+
+print(f"GIA components comparison figure saved to: {fig_path}")
+# %%
+
+# Plotting Frederikse components
+
+print("Loading Frederikse budget data...")
+ds_frederikse = xr.open_dataset(f'{budget_dir}total.nc')
+
+ds_frederikse = rotate_longitude(ds_frederikse, 'lon')
+ds_frederikse = ds_frederikse.rename({'lon': 'longitude', 'lat': 'latitude', 'time': 'year'})
+
+rsl_component = ds_frederikse['total_rsl_mean']
+rad_component = ds_frederikse['total_rad_mean']
+
+print(f"Calculating trends over {start_year}-{end_year}...")
+year_slice = slice(start_year, end_year)
+trend_rsl = rsl_component.sel(year=year_slice).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1)
+trend_rad = rad_component.sel(year=year_slice).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1)
+
+duacs_ds = xr.open_mfdataset(f'{duacs_dir}cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1M-m_*.nc', combine='by_coords').load()
+grid_template = rotate_longitude(duacs_ds, 'longitude')['sla'].isel(time=0)
+
+print("Regridding component trends...")
+regridder = xe.Regridder(trend_rsl, grid_template, 'bilinear', periodic=True)
+trend_rsl_regridded = regridder(trend_rsl)
+trend_rad_regridded = regridder(trend_rad)
+
+#plotting
+print("Generating plot...")
+fig, (ax1, ax2) = plt.subplots(
+    nrows=1,
+    ncols=2,
+    figsize=(18, 7),
+    subplot_kw={'projection': ccrs.PlateCarree()}
+)
+
+extent = [-65, 35, 50, 80]
+region_mask = create_region_mask(trend_rsl_regridded, extent)
+rsl_mean, rsl_rms = calculate_regional_stats(trend_rsl_regridded, region_mask)
+rad_mean, rad_rms = calculate_regional_stats(trend_rad_regridded, region_mask)
+
+vmax = np.nanmax([np.abs(trend_rsl_regridded), np.abs(trend_rad_regridded)])
+vmin = -vmax
+
+def add_map_features(ax, is_left=False, is_bottom=False):
+    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    ax.add_feature(cfeature.LAND, color='lightgray', zorder=1)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
+    gl = ax.gridlines(draw_labels=True, alpha=0.3, dms=True, x_inline=False, y_inline=False)
+    gl.top_labels = gl.right_labels = False
+    gl.left_labels = is_left
+    gl.bottom_labels = is_bottom
+
+#subplot 1: rsl
+im1 = ax1.pcolormesh(trend_rsl_regridded.longitude, trend_rsl_regridded.latitude,
+                     trend_rsl_regridded, transform=ccrs.PlateCarree(),
+                     cmap='RdBu_r', vmin=vmin, vmax=vmax, shading='auto')
+add_map_features(ax1, is_left=True, is_bottom=True)
+ax1.set_title(f'Relative Sea Level (RSL) Trend\nMean: {rsl_mean:.1f} mm/yr, RMS: {rsl_rms:.1f} mm/yr', fontsize=12)
+
+#subplot 2: rad
+im2 = ax2.pcolormesh(trend_rad_regridded.longitude, trend_rad_regridded.latitude,
+                     trend_rad_regridded, transform=ccrs.PlateCarree(),
+                     cmap='RdBu_r', vmin=vmin, vmax=vmax, shading='auto')
+add_map_features(ax2, is_left=False, is_bottom=True)
+ax2.set_title(f'Solid-Earth Deformation (RAD) Trend\nMean: {rad_mean:.1f} mm/yr, RMS: {rad_rms:.1f} mm/yr', fontsize=12)
+
+fig.subplots_adjust(left=0.04, right=0.96, bottom=0.2, top=0.85, wspace=0.07)
+cbar_ax = fig.add_axes([0.25, 0.1, 0.5, 0.03])
+cbar = fig.colorbar(im1, cax=cbar_ax, orientation='horizontal')
+cbar.set_label(f'Sea Level Trend ({start_year}-{end_year}) [mm/yr]', fontsize=14)
+cbar.ax.tick_params(labelsize=12)
+
+fig.suptitle('Frederikse Budget Component Trends',
+             fontsize=18, fontweight='bold', y=0.95)
+
+fig_path = os.path.join(fig_dir, f'Frederikse_components_trend_{start_year}_{end_year}.png')
+plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+plt.show()
+
+print(f"Frederikse components comparison figure saved to: {fig_path}")
+
+try:
+    regridder.clean_weight_file()
+except AttributeError:
+    pass
+
+#%%
