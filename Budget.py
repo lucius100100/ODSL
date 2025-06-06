@@ -8,8 +8,10 @@ import xesmf as xe
 import os
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+import cartopy.mpl.ticker as ctk
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
+import matplotlib.path as mpath
+import matplotlib.ticker as mticker
 import matplotlib_inline.backend_inline
 matplotlib_inline.backend_inline.set_matplotlib_formats('retina')
 
@@ -140,17 +142,23 @@ except AttributeError:
 
 #%%
 
-# Plotting ODSL and components
+# Plotting ODSL results
+print("Plotting ODSL results...")
+
+#North Atlantic Ocean projection and extent following Richter et al. 2017 figure 2
+proj = ccrs.AlbersEqualArea(central_longitude=-15.0, central_latitude=60.0, standard_parallels=(55.0, 75.0))
+extent = [-65, 40, 50, 80]
+
+#plotting
 fig, axes = plt.subplots(
     nrows=2,
     ncols=2,
-    figsize=(18, 9),
-    subplot_kw={'projection': ccrs.PlateCarree()}
+    figsize=(11, 10),
+    subplot_kw={'projection': proj}
 ) 
-ax1, ax2 = axes[0]
-ax3, ax4 = axes[1]
+ax1, ax2, ax3, ax4 = axes.flatten()
 
-#region mask for regionwide statistics
+#mask for regionwide statistics
 def create_region_mask(data_array, extent):
     """Create a mask for the North Atlantic region"""
     lon_min, lon_max, lat_min, lat_max = extent
@@ -160,8 +168,6 @@ def create_region_mask(data_array, extent):
             (data_array.latitude <= lat_max))
     return mask
 
-#North Atlantic Ocean extent following Richter et al. 2017 figure 2
-extent = [-65, 35, 50, 80]
 region_mask = create_region_mask(trend_sla_alt_mm_yr, extent)
 
 #calculate statistics
@@ -177,57 +183,79 @@ geoid_mean, geoid_rms = calculate_regional_stats(trend_asl_fr_regridded_mm_yr, r
 gia_mean, gia_rms = calculate_regional_stats(gia_regridded_mm_yr, region_mask)
 odsl_mean, odsl_rms = calculate_regional_stats(odsl_mm_yr, region_mask)
 
-#North Atlantic Ocean projection following Richter et al. 2017 figure 2
-proj = ccrs.PlateCarree()
-
 #colormap
 vmax_components = max(abs(trend_sla_alt_mm_yr.quantile(0.02)), abs(trend_sla_alt_mm_yr.quantile(0.98)),
                     abs(trend_asl_fr_regridded_mm_yr.quantile(0.02)), abs(trend_asl_fr_regridded_mm_yr.quantile(0.98)))
 
-#shared colorbar layout
-gs = gridspec.GridSpec(2, 2, hspace=0.05, wspace=0.02)
-
 #same map features for all subplots
 def add_map_features(ax, is_left=False, is_bottom=False):
-    """Add standard map features"""
-    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    """Add standard map features and set the conic boundary shape"""
+    #boundary in lat/lon coordinates
+    lon_min, lon_max, lat_min, lat_max = extent
+    boundary_path = mpath.Path([
+        [lon_min, lat_min], [lon_max, lat_min],
+        [lon_max, lat_max], [lon_min, lat_max],
+        [lon_min, lat_min]
+    ]).interpolated(50)
+
+    #AlbersEqualArea projection
+    proj_to_data = ccrs.PlateCarree()._as_mpl_transform(ax) - ax.transData
+    boundary_in_proj_coords = proj_to_data.transform_path(boundary_path)
+    ax.set_boundary(boundary_in_proj_coords)
+
+    #x/y limits to the extents of the projected boundary
+    ax.set_boundary(boundary_in_proj_coords)
+    verts = boundary_in_proj_coords.vertices
+    ax.set_xlim(verts[:, 0].min(), verts[:, 0].max())
+    ax.set_ylim(verts[:, 1].min(), verts[:, 1].max())
+    
+    #features
     ax.add_feature(cfeature.LAND, color='lightgray', zorder=1)
     ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
-    gl = ax.gridlines(draw_labels=True, alpha=0.3, dms=True, x_inline=False, y_inline=False)
-    gl.top_labels = gl.right_labels = False
-    gl.left_labels = is_left
-    gl.bottom_labels = is_bottom
 
+    #gridlines with labels
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+                      linewidth=0.5, color='gray', alpha=0.5, linestyle='-')
+    
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.left_labels = is_left
+    gl.bottom_labels =  is_bottom
+    
 #subplot 1: MSL (Altimetry SLA)
+print("Plotting subplot 1...")
 im1 = ax1.pcolormesh(trend_sla_alt_mm_yr.longitude, trend_sla_alt_mm_yr.latitude, 
                      trend_sla_alt_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax1, is_left=True, is_bottom=True)
-ax1.set_title(f'MSL\n(Altimetry SLA)\nMean: {msl_mean:.1f} mm/yr, RMS: {msl_rms:.1f} mm/yr', 
+ax1.set_title(f'a) MSL (Altimetry SLA)\nMean: {msl_mean:.1f} mm/yr, RMS: {msl_rms:.1f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 2: Geoid (Frederikse ASL change)
+print("Plotting subplot 2...")
 im2 = ax2.pcolormesh(trend_asl_fr_regridded_mm_yr.longitude, trend_asl_fr_regridded_mm_yr.latitude,
                      trend_asl_fr_regridded_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax2, is_left=True, is_bottom=True)
-ax2.set_title(f'Geoid\n(Frederikse budget ASL)\nMean: {geoid_mean:.1f} mm/yr, RMS: {geoid_rms:.1f} mm/yr', 
+ax2.set_title(f'b) Geoid (Frederikse budget ASL)\nMean: {geoid_mean:.1f} mm/yr, RMS: {geoid_rms:.1f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 3: GIA regridded
+print("Plotting subplot 3...")
 im3 = ax3.pcolormesh(gia_regridded_mm_yr.longitude, gia_regridded_mm_yr.latitude,
                      gia_regridded_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax3, is_left=True, is_bottom=True)
-ax3.set_title(f'GIA\nMean: {gia_mean:.1f} mm/yr, RMS: {gia_rms:.1f} mm/yr', 
+ax3.set_title(f'c) GIA\nMean: {gia_mean:.1f} mm/yr, RMS: {gia_rms:.1f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 4: ODSL result (with GIA correction)
+print("Plotting subplot 4...")
 im4 = ax4.pcolormesh(odsl_mm_yr.longitude, odsl_mm_yr.latitude,
-                     odsl_mm_yr, transform=ccrs.PlateCarree(), 
+                     odsl_mm_yr, transform=ccrs.PlateCarree(),
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax4, is_left=True, is_bottom=True)
-ax4.set_title(f'ODSL\n(MSL - Geoid - GIA)\nMean: {odsl_mean:.1f} mm/yr, RMS: {odsl_rms:.1f} mm/yr', 
+ax4.set_title(f'd) ODSL (MSL - Geoid - GIA)\nMean: {odsl_mean:.1f} mm/yr, RMS: {odsl_rms:.1f} mm/yr', 
               fontsize=11, pad=10)
 
 #single colorbar for all subplots
@@ -237,34 +265,31 @@ cbar.set_label('Sea level trend (mm/yr)', fontsize=14)
 cbar.ax.tick_params(labelsize=12)
 
 #figure layout
-plt.suptitle(f'Trends in ODSL ({common_years.min()}-{common_years.max()})', 
+plt.suptitle(f'Trends in ODSL ({common_years.min()}-{common_years.max()})',
              fontsize=16, fontweight='bold', y=0.98)
 fig.subplots_adjust(left=0.05, right=0.95, bottom=0.15, top=0.88, hspace=0.1, wspace=0.1)
 
 #save figure
+print("Saving figure...")
 fig_path = os.path.join(fig_dir, f'ODSL_with_GIA_{common_years.min()}_{common_years.max()}.png')
 plt.savefig(fig_path, dpi=300, bbox_inches='tight')
 plt.show()
 
-print(f"Comprehensive ODSL figure with GIA saved to: {fig_path}")
+print(f"Observational ODSL figure saved to: {fig_path}")
 
 #%%
 
 # Summary
-print("\n=== ODSL Analysis Summary (with GIA) ===")
+print("\n=== ODSL analysis summary ===")
 print(f"Analysis period: {common_years.min()}-{common_years.max()}")
-print(f"MSL proxy (Altimetry SLA) range: {trend_sla_alt_mm_yr.min().item():.1f} to {trend_sla_alt_mm_yr.max().item():.1f} mm/yr")
+print(f"MSL proxy (altimetry SLA) range: {trend_sla_alt_mm_yr.min().item():.1f} to {trend_sla_alt_mm_yr.max().item():.1f} mm/yr")
 print(f"Geoid proxy (Frederikse ASL) range: {trend_asl_fr_regridded_mm_yr.min().item():.1f} to {trend_asl_fr_regridded_mm_yr.max().item():.1f} mm/yr")
 print(f"GIA radial component range: {gia_rad_regridded.min().item():.1f} to {gia_rad_regridded.max().item():.1f} mm/yr")
 print(f"GIA sea component range: {gia_sea_regridded.min().item():.1f} to {gia_sea_regridded.max().item():.1f} mm/yr")
-print(f"ODSL range (with GIA): {odsl_mm_yr.min().item():.1f} to {odsl_mm_yr.max().item():.1f} mm/yr")
-print(f"ODSL global mean (with GIA): {odsl_mm_yr.mean().item():.1f} mm/yr")
-print("\n=== Regional Statistics (North Atlantic) ===")
+print(f"ODSL range: {odsl_mm_yr.min().item():.1f} to {odsl_mm_yr.max().item():.1f} mm/yr")
+print(f"ODSL global mean: {odsl_mm_yr.mean().item():.1f} mm/yr")
+print("\n=== Regional statistics (North Atlantic) ===")
 print(f"MSL mean: {msl_mean:.1f} mm/yr, RMS: {msl_rms:.1f} mm/yr")
 print(f"Geoid mean: {geoid_mean:.1f} mm/yr, RMS: {geoid_rms:.1f} mm/yr")
 print(f"GIA mean: {gia_mean:.1f} mm/yr, RMS: {gia_rms:.1f} mm/yr")
 print(f"ODSL mean: {odsl_mean:.1f} mm/yr, RMS: {odsl_rms:.1f} mm/yr")
-
-#%%
-### CMIP DATA ANALYSIS FOR ODSL ###
-
