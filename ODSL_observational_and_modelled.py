@@ -267,7 +267,7 @@ cbar.set_label('Sea level trend (mm/yr)', fontsize=14)
 cbar.ax.tick_params(labelsize=12)
 
 #figure layout
-plt.suptitle(f'Trends in ODSL ({common_years.min()}-{common_years.max()})',
+plt.suptitle(f'Observed ODSL trend ({common_years.min()}-{common_years.max()})',
              fontsize=16, fontweight='bold', y=0.98)
 fig.subplots_adjust(left=0.05, right=0.95, bottom=0.15, top=0.88, hspace=0.1, wspace=0.1)
 
@@ -587,147 +587,144 @@ for i, model_name in enumerate(sorted_models):
     else:
         pass
 
-if not model_trends_for_period:
-    print("\nNo valid models found with both historical and RCP4.5 data to process.")
-else:
-    print("Calculating multi-model mean and plotting...")
+print("Calculating multi-model mean and plotting...")
 
-    #mean trend calculation and plotting
-    all_trends_da = xr.concat(model_trends_for_period, dim='model')
-    
-    #mean across the model dimension
-    model_mean_trend = all_trends_da.mean(dim='model', skipna=True)
-    
-    fig, ax = plt.subplots(
-        figsize=(9, 8),
-        subplot_kw={'projection': proj}
-    )
-    
-    add_map_features(ax, is_left=True, is_bottom=True)
-    
-    #symmetric color range
-    vmax = abs(model_mean_trend.quantile(0.98, skipna=True).item())
-    vmin = -vmax
-    
-    mesh = model_mean_trend.plot.pcolormesh(
-        ax=ax,
-        transform=ccrs.PlateCarree(),
-        cmap='coolwarm',
-        vmin=vmin,
-        vmax=vmax,
-        add_colorbar=False 
-    )
-    
-    #colorbar
-    cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
-    cbar.set_label('ODSL trend (mm/year)', fontsize=10)
+#mean trend calculation and plotting
+all_trends_da = xr.concat(model_trends_for_period, dim='model')
 
-    #regional statistics
-    region_mask = create_region_mask(model_mean_trend, extent)
-    mean_val, rms_val = calculate_regional_stats(model_mean_trend, region_mask)
+#mean across the model dimension
+model_mean_trend = all_trends_da.mean(dim='model', skipna=True)
 
-    #set the main title
-    ax.set_title(
-        f'CMIP5 multi-model mean ({valid_models_count} models (historical + RCP4.5))\nODSL trend ({start_year}-{end_year}) Mean: {mean_val:.1f} mm/yr, RMS: {rms_val:.1f} mm/yr',
-        fontsize=12, pad=15
-    )
-    
-    plt.show()
+fig, ax = plt.subplots(
+    figsize=(9, 8),
+    subplot_kw={'projection': proj}
+)
+
+add_map_features(ax, is_left=True, is_bottom=True)
+
+#symmetric color range
+vmax = abs(model_mean_trend.quantile(0.98, skipna=True).item())
+vmin = -vmax
+
+mesh = model_mean_trend.plot.pcolormesh(
+    ax=ax,
+    transform=ccrs.PlateCarree(),
+    cmap='coolwarm',
+    vmin=vmin,
+    vmax=vmax,
+    add_colorbar=False 
+)
+
+#colorbar
+cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
+cbar.set_label('ODSL trend (mm/year)', fontsize=10)
+
+#regional statistics
+region_mask = create_region_mask(model_mean_trend, extent)
+mean_val, rms_val = calculate_regional_stats(model_mean_trend, region_mask)
+
+#set the main title
+ax.set_title(
+    f'CMIP5 multi-model mean ({valid_models_count} models (historical + RCP4.5))\nODSL trend ({start_year}-{end_year}) Mean: {mean_val:.1f} mm/yr, RMS: {rms_val:.1f} mm/yr',
+    fontsize=12, pad=15
+)
+
+plt.show()
 
 # %%
 
 #%%
 
-# Observed vs. modeled ODSL trend (1993-2012)
+### Observed vs. modeled ODSL (1993-2012) ###
 
 print("\nComparing observed and modeled ODSL")
 
-if 'odsl_mm_yr' in locals() and 'model_mean_trend' in locals():
+#regrid observed to modelled
+print("Creating xesmf regridder...")
+regridder = xe.Regridder(
+    odsl_mm_yr,           
+    model_mean_trend,     
+    'bilinear',          
+    periodic=True
+)
 
-    #regrid observed to match modelled
-    print("Creating xesmf regridder...")
-    regridder = xe.Regridder(
-        odsl_mm_yr,           
-        model_mean_trend,     
-        'bilinear',          
-        periodic=True
-    )
-    
-    print("Regridding observed data to match model grid...")
-    odsl_observed_regridded = regridder(odsl_mm_yr)
-    
-    #difference (model - Observation)
-    difference = model_mean_trend - odsl_observed_regridded
+print("Regridding observed data to match model grid...")
+odsl_observed_regridded = regridder(odsl_mm_yr)
 
-    #Pearson Correlation Coefficient (PCC)
-    region_mask = create_region_mask(model_mean_trend, extent)
-    obs_masked = odsl_observed_regridded.where(region_mask)
-    mod_masked = model_mean_trend.where(region_mask)
-    
-    obs_flat = obs_masked.values.flatten()
-    mod_flat = mod_masked.values.flatten()
-    valid_indices = ~np.isnan(obs_flat) & ~np.isnan(mod_flat)
-    
-    pcc = np.corrcoef(obs_flat[valid_indices], mod_flat[valid_indices])[0, 1]
-    print(f"PCC in North Atlantic: {pcc:.2f}")
+#difference (model - Observation)
+difference = model_mean_trend - odsl_observed_regridded
 
-    #three subplots
-    fig, (ax1, ax2, ax3) = plt.subplots(
-        nrows=1, ncols=3,
-        figsize=(22, 7),
-        subplot_kw={'projection': proj}
-    )
-    
-    vmax_odsl = max(
-        abs(odsl_observed_regridded.quantile(0.98, skipna=True).item()),
-        abs(model_mean_trend.quantile(0.98, skipna=True).item())
-    )
-    vmin_odsl = -vmax_odsl
+#Pearson Correlation Coefficient (PCC)
+region_mask = create_region_mask(model_mean_trend, extent)
+obs_masked = odsl_observed_regridded.where(region_mask)
+mod_masked = model_mean_trend.where(region_mask)
 
-    #subplot 1: observed ODSL
-    add_map_features(ax1, is_left=True, is_bottom=True)
-    mesh1 = odsl_observed_regridded.plot.pcolormesh(
-        ax=ax1, transform=ccrs.PlateCarree(), cmap='coolwarm',
-        vmin=vmin_odsl, vmax=vmax_odsl, add_colorbar=False
-    )
-    cbar1 = fig.colorbar(mesh1, ax=ax1, orientation='horizontal', shrink=0.8, pad=0.1)
-    cbar1.set_label('Trend (mm/year)')
-    mean_obs, rms_obs = calculate_regional_stats(odsl_observed_regridded, region_mask)
-    ax1.set_title(f'a) Observed ODSL (Regridded)\nMean: {mean_obs:.1f} mm/yr, RMS: {rms_obs:.1f} mm/yr', fontsize=11)
+obs_flat = obs_masked.values.flatten()
+mod_flat = mod_masked.values.flatten()
+valid_indices = ~np.isnan(obs_flat) & ~np.isnan(mod_flat)
 
-    #subplot 2: modelled ODSL
-    add_map_features(ax2, is_left=False, is_bottom=True)
-    mesh2 = model_mean_trend.plot.pcolormesh(
-        ax=ax2, transform=ccrs.PlateCarree(), cmap='coolwarm',
-        vmin=vmin_odsl, vmax=vmax_odsl, add_colorbar=False
-    )
-    cbar2 = fig.colorbar(mesh2, ax=ax2, orientation='horizontal', shrink=0.8, pad=0.1)
-    cbar2.set_label('Trend (mm/year)')
-    mean_mod, rms_mod = calculate_regional_stats(model_mean_trend, region_mask)
-    ax2.set_title(f'b) CMIP5 mean ODSL\nMean: {mean_mod:.1f} mm/yr, RMS: {rms_mod:.1f} mm/yr', fontsize=11)
+pcc = np.corrcoef(obs_flat[valid_indices], mod_flat[valid_indices])[0, 1]
+print(f"PCC in North Atlantic: {pcc:.2f}")
 
-    #subplot 3: difference (model - observed)
-    add_map_features(ax3, is_left=False, is_bottom=True)
-    vmax_diff = abs(difference.quantile(0.98, skipna=True).item())
-    mesh3 = difference.plot.pcolormesh(
-        ax=ax3, transform=ccrs.PlateCarree(), cmap='coolwarm',
-        vmin=-vmax_diff, vmax=vmax_diff, add_colorbar=False
-    )
-    cbar3 = fig.colorbar(mesh3, ax=ax3, orientation='horizontal', shrink=0.8, pad=0.1)
-    cbar3.set_label('Trend difference (mm/year)')
-    mean_diff, rms_diff = calculate_regional_stats(difference, region_mask)
-    ax3.set_title(f'c) Difference (model - obs)\nMean: {mean_diff:.1f} mm/yr, RMS: {rms_diff:.1f} mm/yr', fontsize=11)
+#%%
 
-    #title and layout
-    fig.suptitle(
-        f'Observed vs. modeled ODSL trend ({start_year}-{end_year})\n'
-        f'North Atlantic PCC = {pcc:.2f}',
-        fontsize=16, y=1.02
-    )
-    fig.subplots_adjust(left=0.05, right=0.95, bottom=0.1, top=0.85, wspace=0.15)
-    plt.show()
+# Plotting observed vs. modeled trend
 
-else:
-    print("Could not generate comparison plot: 'odsl_mm_yr' or 'model_mean_trend' not found.")
+#three subplots
+fig, (ax1, ax2, ax3) = plt.subplots(
+    nrows=1, ncols=3,
+    figsize=(22, 7),
+    subplot_kw={'projection': proj}
+)
+
+vmax_unified = max(
+    abs(odsl_observed_regridded.quantile(0.98, skipna=True).item()),
+    abs(model_mean_trend.quantile(0.98, skipna=True).item()),
+    abs(difference.quantile(0.98, skipna=True).item())
+)
+vmin_unified = -vmax_unified
+
+#subplot 1: observed ODSL
+add_map_features(ax1, is_left=True, is_bottom=True)
+mesh1 = odsl_observed_regridded.plot.pcolormesh(
+    ax=ax1, transform=ccrs.PlateCarree(), cmap='coolwarm',
+    vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False
+)
+mean_obs, rms_obs = calculate_regional_stats(odsl_observed_regridded, region_mask)
+ax1.set_title(f'a) Observed ODSL (Regridded)\nMean: {mean_obs:.1f} mm/yr, RMS: {rms_obs:.1f} mm/yr', fontsize=11)
+
+#subplot 2: modelled ODSL
+add_map_features(ax2, is_left=False, is_bottom=True)
+mesh2 = model_mean_trend.plot.pcolormesh(
+    ax=ax2, transform=ccrs.PlateCarree(), cmap='coolwarm',
+    vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False
+)
+mean_mod, rms_mod = calculate_regional_stats(model_mean_trend, region_mask)
+ax2.set_title(f'b) CMIP5 mean ODSL\nMean: {mean_mod:.1f} mm/yr, RMS: {rms_mod:.1f} mm/yr', fontsize=11)
+
+#subplot 3: difference (model - observed)
+add_map_features(ax3, is_left=False, is_bottom=True)
+mesh3 = difference.plot.pcolormesh(
+    ax=ax3, transform=ccrs.PlateCarree(), cmap='coolwarm',
+    vmin=-vmax_unified, vmax=vmax_unified, add_colorbar=False
+)
+mean_diff, rms_diff = calculate_regional_stats(difference, region_mask)
+ax3.set_title(f'c) Difference (model - obs)\nMean: {mean_diff:.1f} mm/yr, RMS: {rms_diff:.1f} mm/yr', fontsize=11)
+
+#title and layout
+fig.suptitle(
+    f'Observed vs. modeled ODSL trend ({start_year}-{end_year})\n'
+    f'North Atlantic PCC = {pcc:.2f}',
+    fontsize=16, y=1.02
+)
+
+#shared colorbar
+cbar_ax = fig.add_axes([0.3, 0.1, 0.4, 0.03])
+cbar = fig.colorbar(mesh1, cax=cbar_ax, orientation='horizontal')
+cbar.set_label('Trend (mm/year)', fontsize=12)
+
+fig.subplots_adjust(left=0.05, right=0.95, bottom=0.1, top=0.85, wspace=0.15)
+plt.show()
 
 # %%
+
