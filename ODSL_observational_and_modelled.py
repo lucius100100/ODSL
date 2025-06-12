@@ -282,6 +282,7 @@ print(f"Observational ODSL figure saved to: {fig_path}")
 #%%
 
 # Summary
+"""
 print("\n=== ODSL analysis summary ===")
 print(f"Analysis period: {common_years.min()}-{common_years.max()}")
 print(f"MSL proxy (altimetry SLA) range: {trend_sla_alt_mm_yr.min().item():.1f} to {trend_sla_alt_mm_yr.max().item():.1f} mm/yr")
@@ -295,6 +296,7 @@ print(f"MSL mean: {msl_mean:.1f} mm/yr, RMS: {msl_rms:.1f} mm/yr")
 print(f"Geoid mean: {geoid_mean:.1f} mm/yr, RMS: {geoid_rms:.1f} mm/yr")
 print(f"GIA mean: {gia_mean:.1f} mm/yr, RMS: {gia_rms:.1f} mm/yr")
 print(f"ODSL mean: {odsl_mean:.1f} mm/yr, RMS: {odsl_rms:.1f} mm/yr")
+"""
 
 #%%
 
@@ -413,6 +415,7 @@ print(f"Found {len(sorted_models)} unique models to process.")
 
 # Plot all available models and scenarios
 
+"""
 #loop through each model, plot, and save to PDF
 with PdfPages(output_pdf_path) as pdf:
     for i, model_name in enumerate(sorted_models):
@@ -493,11 +496,13 @@ with PdfPages(output_pdf_path) as pdf:
         plt.close(fig)
 
 print(f"Output saved to: {output_pdf_path}")
+"""
 
 # %%
 
 # Time coverage CMIP scenarios
 
+'''
 def print_scenario_time_coverage(cmip_version, scenarios):
     """Analyzes and prints the overall time range for each CMIP scenario."""
     print(f"\n{cmip_version} time coverage:")
@@ -537,6 +542,7 @@ def print_scenario_time_coverage(cmip_version, scenarios):
             print(f"  - {scenario.upper():<12}: Could not read time data from any files.")
 
 print_scenario_time_coverage("CMIP5", cmip5_scenarios)
+'''
 
 # %%
 
@@ -630,8 +636,6 @@ ax.set_title(
 )
 
 plt.show()
-
-# %%
 
 #%%
 
