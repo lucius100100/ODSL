@@ -131,7 +131,7 @@ gia_regridded_mm_yr = gia_geoid_correction_mm_yr
 print("Calculating ODSL...")
 odsl_mm_yr = trend_sla_alt_mm_yr - trend_asl_fr_regridded_mm_yr - gia_regridded_mm_yr
 
-print(f"ODSL range: {odsl_mm_yr.min().item():.1f} to {odsl_mm_yr.max().item():.1f} mm/yr")
+print(f"ODSL range: {odsl_mm_yr.min().item():.2f} to {odsl_mm_yr.max().item():.2f} mm/yr")
 
 #clean up regridder
 print("Cleaning up regridder...")
@@ -228,7 +228,7 @@ def calculate_weighted_stats(data_x, mask, data_y=None):
         rmse = np.sqrt(mse)
         
         #area weighted PCC
-        pcc = unbiased_factor * np.sum(w * ((x - mu_x) * (y - mu_y))) / (var_x * var_y)
+        pcc = unbiased_factor * np.sum(w * ((x - mu_x) * (y - mu_y))) / (std_x * std_y)
         
         results.update({
             'mean_y': mu_y.item(), 'std_y': std_y.item(),
@@ -287,7 +287,7 @@ im1 = ax1.pcolormesh(trend_sla_alt_mm_yr.longitude, trend_sla_alt_mm_yr.latitude
                      trend_sla_alt_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax1, is_left=True, is_bottom=True)
-ax1.set_title(f'a) MSL (Altimetry SLA)\nMean: {stats_msl['mean_x']:.1f} mm/yr, RMS: {stats_msl['std_x']:.1f} mm/yr', 
+ax1.set_title(f'a) MSL (Altimetry SLA)\nMean: {stats_msl['mean_x']:.2f} mm/yr, RMS: {stats_msl['std_x']:.2f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 2: Geoid (Frederikse ASL change)
@@ -296,7 +296,7 @@ im2 = ax2.pcolormesh(trend_asl_fr_regridded_mm_yr.longitude, trend_asl_fr_regrid
                      trend_asl_fr_regridded_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax2, is_left=True, is_bottom=True)
-ax2.set_title(f'b) Geoid (Frederikse budget ASL)\nMean: {stats_geoid['mean_x']:.1f} mm/yr, RMS: {stats_geoid['std_x']:.1f} mm/yr', 
+ax2.set_title(f'b) Geoid (Frederikse budget ASL)\nMean: {stats_geoid['mean_x']:.2f} mm/yr, RMS: {stats_geoid['std_x']:.2f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 3: GIA regridded
@@ -305,7 +305,7 @@ im3 = ax3.pcolormesh(gia_regridded_mm_yr.longitude, gia_regridded_mm_yr.latitude
                      gia_regridded_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax3, is_left=True, is_bottom=True)
-ax3.set_title(f'c) GIA\nMean: {stats_gia['mean_x']:.1f} mm/yr, RMS: {stats_gia['std_x']:.1f} mm/yr', 
+ax3.set_title(f'c) GIA\nMean: {stats_gia['mean_x']:.2f} mm/yr, RMS: {stats_gia['std_x']:.2f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 4: ODSL result (with GIA correction)
@@ -314,7 +314,7 @@ im4 = ax4.pcolormesh(odsl_mm_yr.longitude, odsl_mm_yr.latitude,
                      odsl_mm_yr, transform=ccrs.PlateCarree(),
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax4, is_left=True, is_bottom=True)
-ax4.set_title(f'd) ODSL (MSL - Geoid - GIA)\nMean: {stats_odsl['mean_x']:.1f} mm/yr, RMS: {stats_odsl['std_x']:.1f} mm/yr', 
+ax4.set_title(f'd) ODSL (MSL - Geoid - GIA)\nMean: {stats_odsl['mean_x']:.2f} mm/yr, RMS: {stats_odsl['std_x']:.2f} mm/yr', 
               fontsize=11, pad=10)
 
 #single colorbar for all subplots
@@ -342,17 +342,17 @@ print(f"Observational ODSL figure saved to: {fig_path}")
 """
 print("\n=== ODSL analysis summary ===")
 print(f"Analysis period: {common_years.min()}-{common_years.max()}")
-print(f"MSL proxy (altimetry SLA) range: {trend_sla_alt_mm_yr.min().item():.1f} to {trend_sla_alt_mm_yr.max().item():.1f} mm/yr")
-print(f"Geoid proxy (Frederikse ASL) range: {trend_asl_fr_regridded_mm_yr.min().item():.1f} to {trend_asl_fr_regridded_mm_yr.max().item():.1f} mm/yr")
-print(f"GIA radial component range: {gia_rad_regridded.min().item():.1f} to {gia_rad_regridded.max().item():.1f} mm/yr")
-print(f"GIA sea component range: {gia_sea_regridded.min().item():.1f} to {gia_sea_regridded.max().item():.1f} mm/yr")
-print(f"ODSL range: {odsl_mm_yr.min().item():.1f} to {odsl_mm_yr.max().item():.1f} mm/yr")
-print(f"ODSL global mean: {odsl_mm_yr.mean().item():.1f} mm/yr")
+print(f"MSL proxy (altimetry SLA) range: {trend_sla_alt_mm_yr.min().item():.2f} to {trend_sla_alt_mm_yr.max().item():.2f} mm/yr")
+print(f"Geoid proxy (Frederikse ASL) range: {trend_asl_fr_regridded_mm_yr.min().item():.2f} to {trend_asl_fr_regridded_mm_yr.max().item():.2f} mm/yr")
+print(f"GIA radial component range: {gia_rad_regridded.min().item():.2f} to {gia_rad_regridded.max().item():.2f} mm/yr")
+print(f"GIA sea component range: {gia_sea_regridded.min().item():.2f} to {gia_sea_regridded.max().item():.2f} mm/yr")
+print(f"ODSL range: {odsl_mm_yr.min().item():.2f} to {odsl_mm_yr.max().item():.2f} mm/yr")
+print(f"ODSL global mean: {odsl_mm_yr.mean().item():.2f} mm/yr")
 print("\n=== Regional statistics (North Atlantic) ===")
-print(f"MSL mean: {msl_mean:.1f} mm/yr, RMS: {msl_rms:.1f} mm/yr")
-print(f"Geoid mean: {geoid_mean:.1f} mm/yr, RMS: {geoid_rms:.1f} mm/yr")
-print(f"GIA mean: {gia_mean:.1f} mm/yr, RMS: {gia_rms:.1f} mm/yr")
-print(f"ODSL mean: {odsl_mean:.1f} mm/yr, RMS: {odsl_rms:.1f} mm/yr")
+print(f"MSL mean: {msl_mean:.2f} mm/yr, RMS: {msl_rms:.2f} mm/yr")
+print(f"Geoid mean: {geoid_mean:.2f} mm/yr, RMS: {geoid_rms:.2f} mm/yr")
+print(f"GIA mean: {gia_mean:.2f} mm/yr, RMS: {gia_rms:.2f} mm/yr")
+print(f"ODSL mean: {odsl_mean:.2f} mm/yr, RMS: {odsl_rms:.2f} mm/yr")
 """
 
 #%%
@@ -714,7 +714,7 @@ stats_model = calculate_weighted_stats(model_mean_trend, region_mask)
 
 #set the main title
 ax.set_title(
-    f'CMIP5 multi-model mean ({valid_models_count} models (historical + RCP4.5))\nODSL trend ({start_year}-{end_year}) Mean: {stats_model['mean_x']:.1f} mm/yr, RMS: {stats_model['std_x']:.1f} mm/yr',
+    f'CMIP5 multi-model mean ({valid_models_count} models (historical + RCP4.5))\nODSL trend ({start_year}-{end_year}) Mean: {stats_model['mean_x']:.2f} mm/yr, RMS: {stats_model['std_x']:.2f} mm/yr',
     fontsize=12, pad=15
 )
 
@@ -738,14 +738,21 @@ regridder = xe.Regridder(
 print("Regridding observed data to match model grid...")
 odsl_observed_regridded = regridder(odsl_mm_yr)
 
+#removing global mean trend from observed ODSL (CMIP is anomaly field)
+print("Removing global mean trend from observed ODSL...")
+weights = np.cos(np.deg2rad(odsl_observed_regridded.latitude))
+global_mean_obs_trend = odsl_observed_regridded.weighted(weights).mean(dim=("latitude", "longitude")).item()
+print(f"Global mean trend in observations: {global_mean_obs_trend:.2f} mm/yr")
+odsl_obs_dynamic_trend = odsl_observed_regridded - global_mean_obs_trend
+
 #difference (model - Observation)
-difference = model_mean_trend - odsl_observed_regridded
+difference = model_mean_trend - odsl_obs_dynamic_trend
 
 #Pattern Correlation Coefficient (PCC)
 print("Calculating area-weighted statistics...")
 
 region_mask = create_region_mask(model_mean_trend, extent)
-stats_comparison = calculate_weighted_stats(model_mean_trend, region_mask, data_y=odsl_observed_regridded)
+stats_comparison = calculate_weighted_stats(model_mean_trend, region_mask, data_y=odsl_obs_dynamic_trend)
 stats_difference = calculate_weighted_stats(difference, region_mask)
 pcc_w = stats_comparison['pcc']
 
@@ -775,7 +782,7 @@ mesh1 = odsl_observed_regridded.plot.pcolormesh(
     ax=ax1, transform=ccrs.PlateCarree(), cmap='coolwarm',
     vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False
 )
-ax1.set_title(f'a) Observed ODSL (Regridded)\nMean: {stats_comparison["mean_y"]:.1f} mm/yr, RMS: {stats_comparison["std_y"]:.1f} mm/yr', fontsize=11)
+ax1.set_title(f'a) Observed ODSL (Regridded)\nMean: {stats_comparison["mean_y"]:.2f} mm/yr, RMS: {stats_comparison["std_y"]:.2f} mm/yr', fontsize=11)
 
 #subplot 2: modelled ODSL
 add_map_features(ax2, is_left=False, is_bottom=True)
@@ -783,7 +790,7 @@ mesh2 = model_mean_trend.plot.pcolormesh(
     ax=ax2, transform=ccrs.PlateCarree(), cmap='coolwarm',
     vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False
 )
-ax2.set_title(f'b) CMIP5 mean ODSL\nMean: {stats_comparison["mean_x"]:.1f} mm/yr, RMS: {stats_comparison["std_x"]:.1f} mm/yr', fontsize=11)
+ax2.set_title(f'b) CMIP5 mean ODSL\nMean: {stats_comparison["mean_x"]:.2f} mm/yr, RMS: {stats_comparison["std_x"]:.2f} mm/yr', fontsize=11)
 
 #subplot 3: difference (model - observed)
 add_map_features(ax3, is_left=False, is_bottom=True)
@@ -791,7 +798,7 @@ mesh3 = difference.plot.pcolormesh(
     ax=ax3, transform=ccrs.PlateCarree(), cmap='coolwarm',
     vmin=-vmax_unified, vmax=vmax_unified, add_colorbar=False
 )
-ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.1f} mm/yr, RMS: {stats_difference["std_x"]:.1f} mm/yr', fontsize=11)
+ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.2f} mm/yr, RMS: {stats_difference["std_x"]:.2f} mm/yr', fontsize=11)
 
 #title and layout
 fig.suptitle(
@@ -809,3 +816,7 @@ fig.subplots_adjust(left=0.05, right=0.95, bottom=0.1, top=0.85, wspace=0.15)
 plt.show()
 
 # %%
+
+# Sliding window analysis from Richter et al. 2017, Chapter 2. Data and methods, d. Methods
+
+
