@@ -173,17 +173,74 @@ def create_region_mask(data_array, extent):
 region_mask = create_region_mask(trend_sla_alt_mm_yr, extent)
 
 #calculate statistics
-def calculate_regional_stats(data_array, mask):
-    """Calculate mean and RMS for the masked region."""
-    masked_data = data_array.where(mask)
-    regional_mean = masked_data.mean(skipna=True).item()
-    regional_rms = np.sqrt((masked_data**2).mean(skipna=True)).item()
-    return regional_mean, regional_rms
+def calculate_weighted_stats(data_x, mask, data_y=None):
+    """Calculates area-weighted statistics based on the supplementary material 'Computation of metrics used in the analysis' from Richter et al. 2017."""
+    #grid of weights based on the cosine of the latitude
+    weights = np.cos(np.deg2rad(data_x.latitude))
+    weights.name = "weights"
 
-msl_mean, msl_rms = calculate_regional_stats(trend_sla_alt_mm_yr, region_mask)
-geoid_mean, geoid_rms = calculate_regional_stats(trend_asl_fr_regridded_mm_yr, region_mask)
-gia_mean, gia_rms = calculate_regional_stats(gia_regridded_mm_yr, region_mask)
-odsl_mean, odsl_rms = calculate_regional_stats(odsl_mm_yr, region_mask)
+    #single xarray dataset
+    ds = xr.Dataset({'data_x': data_x, 'weights': weights})
+    if data_y is not None:
+        ds['data_y'] = data_y
+
+    #regional mask
+    stacked = ds.where(mask).stack(z=("latitude", "longitude")).dropna(dim="z")
+    
+    #NaNs if no valid data
+    if stacked.z.size == 0:
+        keys = ['mean_x', 'std_x']
+        if data_y is not None:
+            keys.extend(['mean_y', 'std_y', 'rmse', 'pcc'])
+        return {k: np.nan for k in keys}
+
+    x = stacked.data_x
+    #normalize weights
+    w = stacked.weights / stacked.weights.sum()
+
+    #unbiased correction factor for variance eq. (1)
+    unbiased_factor = 1.0 / (1.0 - np.sum(w**2))
+    
+    #area weighted mean eq. (2)
+    mu_x = np.sum(w * x)
+
+    #area weighted variance eq. (4)
+    var_x = unbiased_factor * np.sum(w * (x - mu_x)**2)
+
+    #standard deviation
+    std_x = np.sqrt(var_x)
+    
+    results = {'mean_x': mu_x.item(), 'std_x': std_x.item()}
+
+    #MSE, RMSE, and PCC only if data_y is provided
+    if data_y is not None:
+        y = stacked.data_y
+        
+        #same stats for data_y
+        mu_y = np.sum(w * y)
+        var_y = unbiased_factor * np.sum(w * (y - mu_y)**2)
+        std_y = np.sqrt(var_y)
+        
+        #area weighted MSE eq. (5)
+        mse = unbiased_factor * np.sum(w * ((x - mu_x) - (y - mu_y))**2)
+
+        #area weighted RMSE
+        rmse = np.sqrt(mse)
+        
+        #area weighted PCC
+        pcc = unbiased_factor * np.sum(w * ((x - mu_x) * (y - mu_y))) / (var_x * var_y)
+        
+        results.update({
+            'mean_y': mu_y.item(), 'std_y': std_y.item(),
+            'rmse': rmse.item(), 'pcc': pcc.item()
+        })
+        
+    return results
+
+stats_msl = calculate_weighted_stats(trend_sla_alt_mm_yr, region_mask)
+stats_geoid = calculate_weighted_stats(trend_asl_fr_regridded_mm_yr, region_mask)
+stats_gia = calculate_weighted_stats(gia_regridded_mm_yr, region_mask)
+stats_odsl = calculate_weighted_stats(odsl_mm_yr, region_mask)
 
 #colormap
 vmax_components = max(abs(trend_sla_alt_mm_yr.quantile(0.02)), abs(trend_sla_alt_mm_yr.quantile(0.98)),
@@ -230,7 +287,7 @@ im1 = ax1.pcolormesh(trend_sla_alt_mm_yr.longitude, trend_sla_alt_mm_yr.latitude
                      trend_sla_alt_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax1, is_left=True, is_bottom=True)
-ax1.set_title(f'a) MSL (Altimetry SLA)\nMean: {msl_mean:.1f} mm/yr, RMS: {msl_rms:.1f} mm/yr', 
+ax1.set_title(f'a) MSL (Altimetry SLA)\nMean: {stats_msl['mean_x']:.1f} mm/yr, RMS: {stats_msl['std_x']:.1f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 2: Geoid (Frederikse ASL change)
@@ -239,7 +296,7 @@ im2 = ax2.pcolormesh(trend_asl_fr_regridded_mm_yr.longitude, trend_asl_fr_regrid
                      trend_asl_fr_regridded_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax2, is_left=True, is_bottom=True)
-ax2.set_title(f'b) Geoid (Frederikse budget ASL)\nMean: {geoid_mean:.1f} mm/yr, RMS: {geoid_rms:.1f} mm/yr', 
+ax2.set_title(f'b) Geoid (Frederikse budget ASL)\nMean: {stats_geoid['mean_x']:.1f} mm/yr, RMS: {stats_geoid['std_x']:.1f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 3: GIA regridded
@@ -248,7 +305,7 @@ im3 = ax3.pcolormesh(gia_regridded_mm_yr.longitude, gia_regridded_mm_yr.latitude
                      gia_regridded_mm_yr, transform=ccrs.PlateCarree(), 
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax3, is_left=True, is_bottom=True)
-ax3.set_title(f'c) GIA\nMean: {gia_mean:.1f} mm/yr, RMS: {gia_rms:.1f} mm/yr', 
+ax3.set_title(f'c) GIA\nMean: {stats_gia['mean_x']:.1f} mm/yr, RMS: {stats_gia['std_x']:.1f} mm/yr', 
               fontsize=11, pad=10)
 
 #subplot 4: ODSL result (with GIA correction)
@@ -257,7 +314,7 @@ im4 = ax4.pcolormesh(odsl_mm_yr.longitude, odsl_mm_yr.latitude,
                      odsl_mm_yr, transform=ccrs.PlateCarree(),
                      cmap='RdBu_r', vmin=-vmax_components, vmax=vmax_components, shading='auto')
 add_map_features(ax4, is_left=True, is_bottom=True)
-ax4.set_title(f'd) ODSL (MSL - Geoid - GIA)\nMean: {odsl_mean:.1f} mm/yr, RMS: {odsl_rms:.1f} mm/yr', 
+ax4.set_title(f'd) ODSL (MSL - Geoid - GIA)\nMean: {stats_odsl['mean_x']:.1f} mm/yr, RMS: {stats_odsl['std_x']:.1f} mm/yr', 
               fontsize=11, pad=10)
 
 #single colorbar for all subplots
@@ -502,7 +559,6 @@ print(f"Output saved to: {output_pdf_path}")
 
 # Time coverage CMIP scenarios
 
-'''
 def print_scenario_time_coverage(cmip_version, scenarios):
     """Analyzes and prints the overall time range for each CMIP scenario."""
     print(f"\n{cmip_version} time coverage:")
@@ -542,7 +598,6 @@ def print_scenario_time_coverage(cmip_version, scenarios):
             print(f"  - {scenario.upper():<12}: Could not read time data from any files.")
 
 print_scenario_time_coverage("CMIP5", cmip5_scenarios)
-'''
 
 # %%
 
@@ -550,12 +605,39 @@ print_scenario_time_coverage("CMIP5", cmip5_scenarios)
 
 print("\nCalculating multi-model mean trend for 1993-2012")
 
+#target models from supplementary material table 1 Richter et al. 2017
+target_cmip5_models = [
+    "ACCESS1-0",
+    "bcc-csm1-1",
+    "CanESM2",
+    "CCSM4",
+    "CMCC-CMS",
+    "CNRM-CM5",
+    "CSIRO-Mk3-6-0",
+    "GFDL-ESM2G",
+    "GFDL-ESM2M",
+    "HadGEM2-CC",
+    "HadGEM2-ES",
+    "inmcm4",
+    "IPSL-CM5A-MR",
+    "MIROC-ESM",
+    "MPI-ESM-LR",
+    "MRI-CGCM3",
+    "NorESM1-M",
+    "NorESM1-ME"
+]
+
+all_files = {}
+for scenario in ["historical", "rcp45"]:
+    files, models = get_scenario_files("CMIP5", scenario, return_models=True)
+    all_files[scenario] = {model: file for model, file in zip(models, files)}
+
 #store the trend
 model_trends_for_period = []
 valid_models_count = 0
 
 #loop
-for i, model_name in enumerate(sorted_models):
+for i, model_name in enumerate(target_cmip5_models):
     #check
     hist_file = all_files['historical'].get(model_name)
     rcp45_file = all_files['rcp45'].get(model_name)
@@ -564,6 +646,8 @@ for i, model_name in enumerate(sorted_models):
         try:
             with xr.open_dataset(hist_file) as ds_hist, xr.open_dataset(rcp45_file) as ds_rcp:
                 
+                print(f"Processing target model: {model_name} ({i+1}/{len(target_cmip5_models)})")
+
                 #squeeze and rename
                 zos_hist = ds_hist['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
                 zos_rcp45 = ds_rcp['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
@@ -571,27 +655,26 @@ for i, model_name in enumerate(sorted_models):
                 #combine historical and rcp45
                 combined_zos = xr.concat([zos_hist, zos_rcp45], dim='time')
                 
-                #celect time period
+                #select time period
                 period_data = combined_zos.sel(time=slice(start_year, end_year))
 
-                if period_data.time.size > 1:
-                    #linear trend
-                    trend_coeffs = period_data.polyfit(dim='time', deg=1)
-                    slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
-                    
-                    #cm/year -> mm/year
-                    slope_mm_yr = slope * 10
-                    
-                    model_trends_for_period.append(slope_mm_yr)
-                    valid_models_count += 1
-                    print(f"Processed model: {model_name}")
-                else:
-                    print(f"Skipping {model_name}: not enough data in the {start_year}-{end_year} period.")
+                #linear trend
+                trend_coeffs = period_data.polyfit(dim='time', deg=1)
+                slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
+                
+                #cm/year -> mm/year
+                slope_mm_yr = slope * 10
+                
+                model_trends_for_period.append(slope_mm_yr)
+                valid_models_count += 1
+                print(f"Processed model: {model_name}")
 
         except Exception as e:
             print(f"Could not process model {model_name}: {e}")
     else:
         pass
+
+print(f"\nFinished processing. Found and processed {valid_models_count} out of {len(target_cmip5_models)} target models.")
 
 print("Calculating multi-model mean and plotting...")
 
@@ -627,11 +710,11 @@ cbar.set_label('ODSL trend (mm/year)', fontsize=10)
 
 #regional statistics
 region_mask = create_region_mask(model_mean_trend, extent)
-mean_val, rms_val = calculate_regional_stats(model_mean_trend, region_mask)
+stats_model = calculate_weighted_stats(model_mean_trend, region_mask)
 
 #set the main title
 ax.set_title(
-    f'CMIP5 multi-model mean ({valid_models_count} models (historical + RCP4.5))\nODSL trend ({start_year}-{end_year}) Mean: {mean_val:.1f} mm/yr, RMS: {rms_val:.1f} mm/yr',
+    f'CMIP5 multi-model mean ({valid_models_count} models (historical + RCP4.5))\nODSL trend ({start_year}-{end_year}) Mean: {stats_model['mean_x']:.1f} mm/yr, RMS: {stats_model['std_x']:.1f} mm/yr',
     fontsize=12, pad=15
 )
 
@@ -658,17 +741,15 @@ odsl_observed_regridded = regridder(odsl_mm_yr)
 #difference (model - Observation)
 difference = model_mean_trend - odsl_observed_regridded
 
-#Pearson Correlation Coefficient (PCC)
+#Pattern Correlation Coefficient (PCC)
+print("Calculating area-weighted statistics...")
+
 region_mask = create_region_mask(model_mean_trend, extent)
-obs_masked = odsl_observed_regridded.where(region_mask)
-mod_masked = model_mean_trend.where(region_mask)
+stats_comparison = calculate_weighted_stats(model_mean_trend, region_mask, data_y=odsl_observed_regridded)
+stats_difference = calculate_weighted_stats(difference, region_mask)
+pcc_w = stats_comparison['pcc']
 
-obs_flat = obs_masked.values.flatten()
-mod_flat = mod_masked.values.flatten()
-valid_indices = ~np.isnan(obs_flat) & ~np.isnan(mod_flat)
-
-pcc = np.corrcoef(obs_flat[valid_indices], mod_flat[valid_indices])[0, 1]
-print(f"PCC in North Atlantic: {pcc:.2f}")
+print(f"Area-Weighted PCC in North Atlantic: {pcc_w:.2f}")
 
 #%%
 
@@ -694,8 +775,7 @@ mesh1 = odsl_observed_regridded.plot.pcolormesh(
     ax=ax1, transform=ccrs.PlateCarree(), cmap='coolwarm',
     vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False
 )
-mean_obs, rms_obs = calculate_regional_stats(odsl_observed_regridded, region_mask)
-ax1.set_title(f'a) Observed ODSL (Regridded)\nMean: {mean_obs:.1f} mm/yr, RMS: {rms_obs:.1f} mm/yr', fontsize=11)
+ax1.set_title(f'a) Observed ODSL (Regridded)\nMean: {stats_comparison["mean_y"]:.1f} mm/yr, RMS: {stats_comparison["std_y"]:.1f} mm/yr', fontsize=11)
 
 #subplot 2: modelled ODSL
 add_map_features(ax2, is_left=False, is_bottom=True)
@@ -703,8 +783,7 @@ mesh2 = model_mean_trend.plot.pcolormesh(
     ax=ax2, transform=ccrs.PlateCarree(), cmap='coolwarm',
     vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False
 )
-mean_mod, rms_mod = calculate_regional_stats(model_mean_trend, region_mask)
-ax2.set_title(f'b) CMIP5 mean ODSL\nMean: {mean_mod:.1f} mm/yr, RMS: {rms_mod:.1f} mm/yr', fontsize=11)
+ax2.set_title(f'b) CMIP5 mean ODSL\nMean: {stats_comparison["mean_x"]:.1f} mm/yr, RMS: {stats_comparison["std_x"]:.1f} mm/yr', fontsize=11)
 
 #subplot 3: difference (model - observed)
 add_map_features(ax3, is_left=False, is_bottom=True)
@@ -712,13 +791,12 @@ mesh3 = difference.plot.pcolormesh(
     ax=ax3, transform=ccrs.PlateCarree(), cmap='coolwarm',
     vmin=-vmax_unified, vmax=vmax_unified, add_colorbar=False
 )
-mean_diff, rms_diff = calculate_regional_stats(difference, region_mask)
-ax3.set_title(f'c) Difference (model - obs)\nMean: {mean_diff:.1f} mm/yr, RMS: {rms_diff:.1f} mm/yr', fontsize=11)
+ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.1f} mm/yr, RMS: {stats_difference["std_x"]:.1f} mm/yr', fontsize=11)
 
 #title and layout
 fig.suptitle(
     f'Observed vs. modeled ODSL trend ({start_year}-{end_year})\n'
-    f'North Atlantic PCC = {pcc:.2f}',
+    f'North Atlantic PCC = {pcc_w:.2f}',
     fontsize=16, y=1.02
 )
 
@@ -731,4 +809,3 @@ fig.subplots_adjust(left=0.05, right=0.95, bottom=0.1, top=0.85, wspace=0.15)
 plt.show()
 
 # %%
-
