@@ -19,6 +19,19 @@ matplotlib_inline.backend_inline.set_matplotlib_formats('retina')
 
 #%%
 ### --- OBSERVATIONAL DATA ANALYSIS FOR ODSL --- ###
+#----------------------------------------------------------------------------------------------------------------------#
+# --- Altimetry data ---
+# DOI: 10.48670/moi-00148
+# Link to data: https://data.marine.copernicus.eu/product/SEALEVEL_GLO_PHY_L4_MY_008_047/description
+#----------------------------------------------------------------------------------------------------------------------#
+# --- Budget data ---
+# Frederikse, T., Landerer, F., Caron, L., Adhikari, S., Parkes, D., Humphrey, V. W., ... & Wu, Y. H. (2020). The causes of sea-level rise since 1900. Nature, 584(7821), 393-397.
+# Link to data: https://zenodo.org/records/3862995
+#----------------------------------------------------------------------------------------------------------------------#
+# --- GIA data ---
+# Peltier, W. R., Argus, D. F., & Drummond, R. (2015). Space geodesy constrains ice age terminal deglaciation: The global ICE‐6G_C (VM5a) model. Journal of Geophysical Research: Solid Earth, 120(1), 450-487.
+# Link to data: https://www.atmosp.physics.utoronto.ca/~peltier/data.php
+#----------------------------------------------------------------------------------------------------------------------#
 
 # Observational configuration
 duacs_dir = r'C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\Altimetry\\'
@@ -101,8 +114,8 @@ common_years = np.intersect1d(alt_years, fr_years)
 print(f"Analysis period: {common_years.min()}-{common_years.max()} ({len(common_years)} years)")
 
 #calculate trends over common period
-trend_sla_alt = duacs_yearly.sla.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1)    #MSL proxy   (cm/yr)
-trend_asl_fr = asl_frederikse.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1)       #geoid proxy (mm/yr)
+trend_sla_alt = duacs_yearly.sla.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1) #MSL proxy   (cm/yr)
+trend_asl_fr = asl_frederikse.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1) #geoid proxy (mm/yr)
 
 #%%
 
@@ -338,26 +351,11 @@ print(f"Observational ODSL figure saved to: {fig_path}")
 
 #%%
 
-# Summary
-"""
-print("\n=== ODSL analysis summary ===")
-print(f"Analysis period: {common_years.min()}-{common_years.max()}")
-print(f"MSL proxy (altimetry SLA) range: {trend_sla_alt_mm_yr.min().item():.2f} to {trend_sla_alt_mm_yr.max().item():.2f} mm/yr")
-print(f"Geoid proxy (Frederikse ASL) range: {trend_asl_fr_regridded_mm_yr.min().item():.2f} to {trend_asl_fr_regridded_mm_yr.max().item():.2f} mm/yr")
-print(f"GIA radial component range: {gia_rad_regridded.min().item():.2f} to {gia_rad_regridded.max().item():.2f} mm/yr")
-print(f"GIA sea component range: {gia_sea_regridded.min().item():.2f} to {gia_sea_regridded.max().item():.2f} mm/yr")
-print(f"ODSL range: {odsl_mm_yr.min().item():.2f} to {odsl_mm_yr.max().item():.2f} mm/yr")
-print(f"ODSL global mean: {odsl_mm_yr.mean().item():.2f} mm/yr")
-print("\n=== Regional statistics (North Atlantic) ===")
-print(f"MSL mean: {msl_mean:.2f} mm/yr, RMS: {msl_rms:.2f} mm/yr")
-print(f"Geoid mean: {geoid_mean:.2f} mm/yr, RMS: {geoid_rms:.2f} mm/yr")
-print(f"GIA mean: {gia_mean:.2f} mm/yr, RMS: {gia_rms:.2f} mm/yr")
-print(f"ODSL mean: {odsl_mean:.2f} mm/yr, RMS: {odsl_rms:.2f} mm/yr")
-"""
-
-#%%
-
 ### --- CMIP DATA ANALYSIS FOR ODSL --- ###
+#----------------------------------------------------------------------------------------------------------------------#
+# Preprocessing done by Dewi Le Bars, KNMI
+# https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py
+#----------------------------------------------------------------------------------------------------------------------#
 
 # Load in CMIP data
 
@@ -410,49 +408,9 @@ def get_scenario_files(cmip_version, scenario, return_models=False):
     
     return files
 
-def extract_model_from_path(filepath):
-    """Extract model name from a CMIP file path"""
-    basename = os.path.basename(filepath)
-    #remove .nc extension
-    name_without_ext = basename.replace('.nc', '')
-    #split by underscore
-    parts = name_without_ext.split('_')
-    
-    if len(parts) >= 6:
-        model_parts = parts[3:-2]
-        return '_'.join(model_parts)
-    else:
-        return parts[3] if len(parts) > 3 else "unknown"
-
-def calculate_zos_trend(filepath):
-    """Load a CMIP NetCDF file, calculate the linear trend of zos, and convert units to mm/year."""
-    try:
-        with xr.open_dataset(filepath) as ds:
-            #variable name
-            zos_var_name = 'CorrectedReggrided_zos'
-            
-            #squeeze and rename
-            data = ds[zos_var_name].squeeze('model', drop=True)
-            if 'lon' in data.coords and 'lat' in data.coords:
-                data = data.rename({'lon': 'longitude', 'lat': 'latitude'})
-
-            #linear trend along the time dimension
-            trend_coeffs = data.polyfit(dim='time', deg=1)
-            slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
-            
-            #cm/year -> mm/year
-            slope_mm_yr = slope * 10
-            
-            return slope_mm_yr
-            
-    except Exception as e:
-        print(f"Could not process file {os.path.basename(filepath)}: {e}")
-        return None
-
 #define scenarios
 cmip5_scenarios = ["historical", "rcp26", "rcp45", "rcp85"]
 cmip6_scenarios = ["historical", "ssp126", "ssp245", "ssp585"]
-output_pdf_path = "cmip5_model_odsl_trends.pdf"
 
 #find all available files and unique models
 print("Finding all available models and files...")
@@ -468,142 +426,11 @@ for scenario in cmip5_scenarios:
 sorted_models = sorted(list(all_models))
 print(f"Found {len(sorted_models)} unique models to process.")
 
-#%%
-
-# Plot all available models and scenarios
-
-"""
-#loop through each model, plot, and save to PDF
-with PdfPages(output_pdf_path) as pdf:
-    for i, model_name in enumerate(sorted_models):
-        print(f"Processing model {i+1}/{len(sorted_models)}: {model_name}")
-
-        #figure with 2x2 subplots for four scenarios
-        fig, axes = plt.subplots(
-            nrows=2,
-            ncols=2,
-            figsize=(12, 10),
-            subplot_kw={'projection': proj}
-        )
-        axes_flat = axes.flatten()
-        
-        #store trends
-        model_trends = {}
-
-        #calculate trend for each scenario per model
-        for scenario in cmip5_scenarios:
-            if model_name in all_files[scenario]:
-                filepath = all_files[scenario][model_name]
-                trend_data = calculate_zos_trend(filepath)
-                if trend_data is not None:
-                    model_trends[scenario] = trend_data
-
-        #if no data could be processed for model, skip
-        if not model_trends:
-            print(f"  -> Skipping model {model_name} due to no processable data.")
-            plt.close(fig)
-            continue
-        
-        #symmetric color range
-        max_abs_val = 0
-        for trend in model_trends.values():
-            #quantiles to avoid extreme outliers skewing color scale
-            v_max_q = abs(trend.quantile(0.99, skipna=True).item())
-            v_min_q = abs(trend.quantile(0.01, skipna=True).item())
-            max_abs_val = max(max_abs_val, v_max_q, v_min_q)
-        
-        vmax = max_abs_val
-        vmin = -max_abs_val
-        
-        #plotting
-        for ax, scenario in zip(axes_flat, cmip5_scenarios):
-            if scenario in model_trends:
-                data_to_plot = model_trends[scenario]
-                
-                #determine if axis labels should be drawn
-                is_left = ax in [axes[0,0], axes[1,0]]
-                is_bottom = ax in [axes[1,0], axes[1,1]]
-                
-                add_map_features(ax, is_left=is_left, is_bottom=is_bottom)
-
-                mesh = data_to_plot.plot.pcolormesh(
-                    ax=ax,
-                    transform=ccrs.PlateCarree(),
-                    cmap='coolwarm',
-                    vmin=vmin,
-                    vmax=vmax,
-                    add_colorbar=False #single colorbar for each subplot per model
-                )
-                ax.set_title(f"Scenario: {scenario.upper()}")
-            else:
-                #if no data, hide axis
-                ax.set_visible(False)
-        
-        #single colorbar for the whole figure
-        fig.subplots_adjust(right=0.85, hspace=0.15, wspace=0.1)
-        cbar_ax = fig.add_axes([0.88, 0.25, 0.03, 0.5])
-        cbar = fig.colorbar(mesh, cax=cbar_ax)
-        cbar.set_label('Sea level trend (mm/year)')
-
-        #main title for the model
-        fig.suptitle(f'CMIP5 ODSL trend for model: {model_name}', fontsize=16, y=0.96)
-        
-        #save to PDF
-        pdf.savefig(fig)
-        plt.close(fig)
-
-print(f"Output saved to: {output_pdf_path}")
-"""
-
 # %%
 
-# Time coverage CMIP scenarios
+# CMIP5 multimodel ODSL (historical + RCP4.5) following Richter et al. 2017 model selection
 
-def print_scenario_time_coverage(cmip_version, scenarios):
-    """Analyzes and prints the overall time range for each CMIP scenario."""
-    print(f"\n{cmip_version} time coverage:")
-    
-    for scenario in scenarios:
-        #all files for the current scenario
-        files = get_scenario_files(cmip_version, scenario)
-        
-        if not files:
-            print(f"  - {scenario.upper():<12}: No files found.")
-            continue
-
-        #initialize with extreme values
-        overall_start_year = float('inf')
-        overall_end_year = float('-inf')
-
-        #loop through each model file in the scenario
-        for f in files:
-            try:
-                with xr.open_dataset(f) as ds:
-                    start_year = int(ds.time.min().item())
-                    end_year = int(ds.time.max().item())
-
-                    #update overall time range
-                    if start_year < overall_start_year:
-                        overall_start_year = start_year
-                    if end_year > overall_end_year:
-                        overall_end_year = end_year
-            except Exception as e:
-                #warning if not processable
-                print(f"[Warning] Could not process file {os.path.basename(f)}: {e}")
-
-        #print result for scenario
-        if overall_start_year != float('inf'):
-            print(f"  - {scenario.upper():<12}: {overall_start_year} - {overall_end_year}")
-        else:
-            print(f"  - {scenario.upper():<12}: Could not read time data from any files.")
-
-print_scenario_time_coverage("CMIP5", cmip5_scenarios)
-
-# %%
-
-# CMIP multimodel mean ODSL (historical + RCP4.5)
-
-print("\nCalculating multi-model mean trend for 1993-2012")
+print("\nCalculating multi-model for 1993-2012")
 
 #target models from supplementary material table 1 Richter et al. 2017
 target_cmip5_models = [
@@ -627,14 +454,73 @@ target_cmip5_models = [
     "NorESM1-ME"
 ]
 
-all_files = {}
-for scenario in ["historical", "rcp45"]:
-    files, models = get_scenario_files("CMIP5", scenario, return_models=True)
-    all_files[scenario] = {model: file for model, file in zip(models, files)}
+def process_cmip_model(model_name, hist_file, rcp_file, start_year, end_year, extent):
+    """Process a single CMIP model and return results in dictionary."""
+    try:
+        with xr.open_dataset(hist_file) as ds_hist, xr.open_dataset(rcp_file) as ds_rcp:
+            #squeeze and rename
+            zos_hist = ds_hist['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
+            zos_rcp = ds_rcp['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
+            
+            #combine historical and rcp
+            combined_zos = xr.concat([zos_hist, zos_rcp], dim='time')
+            
+            #create region mask for this model's grid
+            region_mask = create_region_mask(combined_zos.isel(time=0), extent)
+            
+            #build model data dictionary
+            model_data = {
+                'full_timeseries': combined_zos,
+                'time_range': (int(combined_zos.time.min().item()), int(combined_zos.time.max().item())),
+                'historical_years': (int(zos_hist.time.min().item()), int(zos_hist.time.max().item())),
+                'rcp_years': (int(zos_rcp.time.min().item()), int(zos_rcp.time.max().item())),
+                'grid_info': {
+                    'lon': combined_zos.longitude.values,
+                    'lat': combined_zos.latitude.values,
+                    'lon_res': float(combined_zos.longitude.diff('longitude').mean().item()),
+                    'lat_res': float(combined_zos.latitude.diff('latitude').mean().item())
+                },
+                'region_mask': region_mask  
+            }
+            
+            #select time period for current analysis
+            period_data = combined_zos.sel(time=slice(start_year, end_year))
+            
+            #linear trend
+            trend_coeffs = period_data.polyfit(dim='time', deg=1)
+            slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
+            
+            #cm/year -> mm/year
+            slope_mm_yr = slope * 10
+            
+            #calculate period mean in mm
+            period_mean_mm = period_data.mean(dim='time') * 10
+            
+            #calculate area-weighted statistics
+            trend_stats = calculate_weighted_stats(slope_mm_yr, region_mask)
+            mean_stats = calculate_weighted_stats(period_mean_mm, region_mask)
+            
+            #add period-specific results
+            model_data['period_analysis'] = {
+                'period': (start_year, end_year),
+                'trend_mm_yr': slope_mm_yr,
+                'trend_coeffs': trend_coeffs,
+                'period_mean_mm': period_mean_mm,
+                'trend_stats': trend_stats,  
+                'mean_stats': mean_stats,     
+                'n_years': len(period_data.time)
+            }
+            
+            return model_data, slope_mm_yr
+            
+    except Exception as e:
+        print(f"Could not process model {model_name}: {e}")
+        return None, None
 
-#store the trend
-model_trends_for_period = []
+#store model data in dictionaries
+model_data_dict = {}
 valid_models_count = 0
+model_trends_for_period = []
 
 #loop
 for i, model_name in enumerate(target_cmip5_models):
@@ -643,40 +529,43 @@ for i, model_name in enumerate(target_cmip5_models):
     rcp45_file = all_files['rcp45'].get(model_name)
 
     if hist_file and rcp45_file:
-        try:
-            with xr.open_dataset(hist_file) as ds_hist, xr.open_dataset(rcp45_file) as ds_rcp:
-                
-                print(f"Processing target model: {model_name} ({i+1}/{len(target_cmip5_models)})")
-
-                #squeeze and rename
-                zos_hist = ds_hist['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
-                zos_rcp45 = ds_rcp['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
-                
-                #combine historical and rcp45
-                combined_zos = xr.concat([zos_hist, zos_rcp45], dim='time')
-                
-                #select time period
-                period_data = combined_zos.sel(time=slice(start_year, end_year))
-
-                #linear trend
-                trend_coeffs = period_data.polyfit(dim='time', deg=1)
-                slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
-                
-                #cm/year -> mm/year
-                slope_mm_yr = slope * 10
-                
-                model_trends_for_period.append(slope_mm_yr)
-                valid_models_count += 1
-                print(f"Processed model: {model_name}")
-
-        except Exception as e:
-            print(f"Could not process model {model_name}: {e}")
-    else:
-        pass
+        print(f"Processing target model: {model_name} ({i+1}/{len(target_cmip5_models)})")
+        
+        model_data, slope_mm_yr = process_cmip_model(
+            model_name, hist_file, rcp45_file, 
+            start_year, end_year, extent
+        )
+        
+        if model_data is not None:
+            model_data_dict[model_name] = model_data
+            model_trends_for_period.append(slope_mm_yr)
+            valid_models_count += 1
+            print(f"Processed model: {model_name}")
 
 print(f"\nFinished processing. Found and processed {valid_models_count} out of {len(target_cmip5_models)} target models.")
 
-print("Calculating multi-model mean and plotting...")
+print(f"\n{'='*80}")
+print(f"Processed models summary ({len(model_data_dict)} models)")
+print(f"{'='*80}")
+for model_name, data in model_data_dict.items():
+    print(f"\n{model_name}:")
+    print(f"Time coverage: {data['time_range'][0]}-{data['time_range'][1]} "
+          f"(Historical: {data['historical_years'][0]}-{data['historical_years'][1]}, "
+          f"RCP4.5: {data['rcp_years'][0]}-{data['rcp_years'][1]})")
+    print(f"Grid resolution: {data['grid_info']['lon_res']:.2f}° x {data['grid_info']['lat_res']:.2f}°")
+    print(f"Period analyzed: {data['period_analysis']['period'][0]}-{data['period_analysis']['period'][1]} "
+          f"({data['period_analysis']['n_years']} years)")
+    print(f"Regional trend: {data['period_analysis']['trend_stats']['mean_x']:.2f} ± "
+          f"{data['period_analysis']['trend_stats']['std_x']:.2f} mm/yr")
+    print(f"Regional mean: {data['period_analysis']['mean_stats']['mean_x']:.2f} ± "
+          f"{data['period_analysis']['mean_stats']['std_x']:.2f} mm")
+print(f"\n{'='*80}")
+
+#%%
+
+#  Multi-model mean trend (1993-2012) and plotting
+
+print("\nCalculating multi-model mean trend for 1993-2012 and plotting...")
 
 #mean trend calculation and plotting
 all_trends_da = xr.concat(model_trends_for_period, dim='model')
@@ -740,6 +629,8 @@ odsl_observed_regridded = regridder(odsl_mm_yr)
 
 #removing global mean trend from observed ODSL (CMIP is anomaly field)
 print("Removing global mean trend from observed ODSL...")
+
+#contribution of each grid cell to the final average is proportional to its actual area on the earths surface
 weights = np.cos(np.deg2rad(odsl_observed_regridded.latitude))
 global_mean_obs_trend = odsl_observed_regridded.weighted(weights).mean(dim=("latitude", "longitude")).item()
 print(f"Global mean trend in observations: {global_mean_obs_trend:.2f} mm/yr")
@@ -817,6 +708,235 @@ plt.show()
 
 # %%
 
-# Sliding window analysis from Richter et al. 2017, Chapter 2. Data and methods, d. Methods
+# --- SLIDING WINDOW ANALYSIS --- # 
+# Richter et al. 2017, Chapter 2. Data and methods, d. Methods
 
+#regrid observations to model grid
+print("Regridding observations to CMIP model grid...")
+sample_model_data = list(model_data_dict.values())[0]
+sample_model_grid = sample_model_data['period_analysis']['trend_mm_yr']
 
+#regridder
+regridder_obs_to_model = xe.Regridder(odsl_mm_yr, sample_model_grid, 'bilinear', periodic=True)
+odsl_mm_yr_regridded = regridder_obs_to_model(odsl_mm_yr)
+
+try:
+    regridder_obs_to_model.clean_weight_file()
+except AttributeError:
+    pass
+
+print(f"Original observation grid: {odsl_mm_yr.shape}")
+print(f"Regridded observation grid: {odsl_mm_yr_regridded.shape}")
+print(f"Model grid: {sample_model_grid.shape}")
+
+def sliding_window_analysis_for_model(model_name, model_data, obs_odsl_regridded, window_size=20, 
+                                    start_year=1850, end_year=2012):
+    """Sliding window analysis on a single model."""
+    
+    print(f"  Processing sliding windows for {model_name}...")
+    
+    #full timeseries and region mask
+    full_timeseries = model_data['full_timeseries']
+    region_mask = model_data['region_mask']
+    
+    #initialize storage
+    results = {
+        'windows': [],
+        'trends': [],
+        'variability': [],
+        'mdt': [],
+        'pcc': [],
+        'rmse': [],
+        'rmse_total': []
+    }
+    
+    #slide window
+    n_windows = 0
+    for window_start in range(start_year, end_year - window_size + 1):
+        window_end = window_start + window_size - 1
+        
+        #data for current window
+        window_data = full_timeseries.sel(time=slice(window_start, window_end))
+        
+        if len(window_data.time) < window_size * 0.75:
+            continue
+            
+        #linear trend (cm/yr -> mm/yr)
+        trend_coeffs = window_data.polyfit(dim='time', deg=1)
+        trend_mm_yr = trend_coeffs.polyfit_coefficients.sel(degree=1) * 10
+        
+        #cmip odsl
+        mdt = window_data.mean(dim='time') * 10
+        
+        #variability after detrending
+        intercept = trend_coeffs.polyfit_coefficients.sel(degree=0)
+        slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
+        time_values = window_data.time.values
+        
+        detrended = window_data.copy()
+        for t_idx, t_val in enumerate(time_values):
+            trend_value = intercept + slope * t_val
+            detrended[t_idx] = window_data[t_idx] - trend_value
+            
+        variability = detrended.std(dim='time') * 10
+        
+        #results
+        results['windows'].append((window_start, window_end))
+        results['trends'].append(trend_mm_yr)
+        results['variability'].append(variability)
+        results['mdt'].append(mdt)
+        
+        #centered statistics
+        stats = calculate_weighted_stats(trend_mm_yr, region_mask, data_y=obs_odsl_regridded)
+        results['pcc'].append(stats['pcc'])
+        results['rmse'].append(stats['rmse'])
+        
+        #total RMSE without removing regional mean
+        weights = np.cos(np.deg2rad(trend_mm_yr.latitude))
+        weights_normalized = weights / weights.sum()
+        diff_squared = (trend_mm_yr - obs_odsl_regridded)**2
+        masked_diff = diff_squared.where(region_mask)
+        weighted_mse = (weights_normalized * masked_diff).sum()
+        rmse_total = np.sqrt(weighted_mse)
+        results['rmse_total'].append(float(rmse_total))
+        
+        n_windows += 1
+        
+    print(f"Processed {n_windows} windows")
+    
+    #best periods
+    pcc_array = np.array(results['pcc'])
+    rmse_array = np.array(results['rmse'])
+    
+    #check valid PCC/RMSE values
+    valid_pcc = ~np.isnan(pcc_array)
+    valid_rmse = ~np.isnan(rmse_array)
+    
+    if valid_pcc.any():
+        best_pcc_idx = np.nanargmax(pcc_array)
+        results['best_pcc'] = {
+            'window': results['windows'][best_pcc_idx],
+            'pcc': results['pcc'][best_pcc_idx],
+            'trend': results['trends'][best_pcc_idx],
+            'variability': results['variability'][best_pcc_idx],
+            'mdt': results['mdt'][best_pcc_idx]
+        }
+        print(f"Best PCC: {results['best_pcc']['pcc']:.3f} ({results['best_pcc']['window'][0]}-{results['best_pcc']['window'][1]})")
+    else:
+        print(f"WARNING: No valid PCC values found for {model_name}")
+        
+    if valid_rmse.any():
+        best_rmse_idx = np.nanargmin(rmse_array)
+        results['best_rmse'] = {
+            'window': results['windows'][best_rmse_idx],
+            'rmse': results['rmse'][best_rmse_idx],
+            'trend': results['trends'][best_rmse_idx],
+            'variability': results['variability'][best_rmse_idx],
+            'mdt': results['mdt'][best_rmse_idx]
+        }
+        print(f"Best RMSE: {results['best_rmse']['rmse']:.3f} ({results['best_rmse']['window'][0]}-{results['best_rmse']['window'][1]})")
+    else:
+        print(f"WARNING: No valid RMSE values found for {model_name}")
+    
+    return results
+
+print("\nPerforming sliding window analysis...")
+print("=" * 60)
+
+#run sliding window analysis all models
+sliding_results = {}
+for model_name, model_data in model_data_dict.items():
+    results = sliding_window_analysis_for_model(
+        model_name, model_data, odsl_mm_yr_regridded,
+        window_size=20, start_year=1850, end_year=2012
+    )
+    sliding_results[model_name] = results
+
+#%%
+
+#ensemble means following Richter et al. 2017
+print("\nCreating ensemble means...")
+
+#observational period (1993-2012) ensemble
+obs_period_trends = []
+for model_name, model_data in model_data_dict.items():
+    obs_period_trends.append(model_data['period_analysis']['trend_mm_yr'])
+
+#best PCC period ensemble
+best_pcc_trends = []
+for model_name, results in sliding_results.items():
+    if 'best_pcc' in results:
+        best_pcc_trends.append(results['best_pcc']['trend'])
+
+#best RMSE period ensemble
+best_rmse_trends = []
+for model_name, results in sliding_results.items():
+    if 'best_rmse' in results:
+        best_rmse_trends.append(results['best_rmse']['trend'])
+
+#ensemble means
+obs_period_mean = xr.concat(obs_period_trends, dim='model').mean(dim='model')
+best_pcc_mean = xr.concat(best_pcc_trends, dim='model').mean(dim='model') if best_pcc_trends else None
+best_rmse_mean = xr.concat(best_rmse_trends, dim='model').mean(dim='model') if best_rmse_trends else None
+
+#statistics for each ensemble
+region_mask = create_region_mask(obs_period_mean, extent)
+
+#%%
+
+print("\nEnsemble mean statistics:")
+print("-" * 40)
+
+#remove global mean from regridded observations (models are anomalies)
+weights = np.cos(np.deg2rad(odsl_mm_yr_regridded.latitude))
+global_mean = odsl_mm_yr_regridded.weighted(weights).mean(dim=("latitude", "longitude")).item()
+odsl_obs_dynamic = odsl_mm_yr_regridded - global_mean
+
+#observation period ensemble
+stats_obs = calculate_weighted_stats(obs_period_mean, region_mask, data_y=odsl_obs_dynamic)
+print(f"Observational period (1993-2012) ensemble:")
+print(f"  PCC: {stats_obs['pcc']:.3f}, RMSE: {stats_obs['rmse']:.3f} mm/yr")
+
+#best PCC ensemble
+if best_pcc_mean is not None:
+    stats_pcc = calculate_weighted_stats(best_pcc_mean, region_mask, data_y=odsl_obs_dynamic)
+    print(f"Best PCC period ensemble:")
+    print(f"  PCC: {stats_pcc['pcc']:.3f}, RMSE: {stats_pcc['rmse']:.3f} mm/yr")
+
+#best RMSE ensemble
+if best_rmse_mean is not None:
+    stats_rmse = calculate_weighted_stats(best_rmse_mean, region_mask, data_y=odsl_obs_dynamic)
+    print(f"Best RMSE period ensemble:")
+    print(f"  PCC: {stats_rmse['pcc']:.3f}, RMSE: {stats_rmse['rmse']:.3f} mm/yr")
+
+#%%
+
+#plot PCC time series
+print("\nPlotting PCC time series...")
+fig, ax = plt.subplots(figsize=(12, 6))
+
+for model_name, results in sliding_results.items():
+    if results['windows']:
+        window_centers = [(w[0] + w[1]) / 2 for w in results['windows']]
+        ax.plot(window_centers, results['pcc'], alpha=0.5, linewidth=1)
+
+ax.axvline(2002.5, color='red', linestyle='--', alpha=0.7, label='Obs period center')
+ax.set_xlabel('Window center year', fontsize=12)
+ax.set_ylabel('PCC', fontsize=12)
+ax.set_title('Model-observation PCC\n20-year sliding windows (1850-2012)', fontsize=14)
+ax.grid(True, alpha=0.3)
+ax.legend()
+ax.set_ylim(-1, 1)
+plt.tight_layout()
+plt.show()
+
+#summary best periods across models
+print("\n" + "=" * 60)
+print("SUMMARY: Best matching periods for each model")
+print("=" * 60)
+for model_name, results in sliding_results.items():
+    if 'best_pcc' in results:
+        print(f"{model_name:20s} | Best PCC: {results['best_pcc']['window'][0]}-{results['best_pcc']['window'][1]} "
+              f"(PCC={results['best_pcc']['pcc']:.3f})")
+
+# %%
