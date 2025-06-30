@@ -13,6 +13,8 @@ import cartopy.mpl.ticker as ctk
 import matplotlib.pyplot as plt
 import matplotlib.path as mpath
 import matplotlib.ticker as mticker
+import matplotlib.cm as cm
+from matplotlib.lines import Line2D
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib_inline.backend_inline
 matplotlib_inline.backend_inline.set_matplotlib_formats('retina')
@@ -884,6 +886,8 @@ region_mask = create_region_mask(obs_period_mean, extent)
 
 #%%
 
+#display ensemble means
+
 print("\nEnsemble mean statistics:")
 print("-" * 40)
 
@@ -911,22 +915,157 @@ if best_rmse_mean is not None:
 
 #%%
 
-#plot PCC time series
-print("\nPlotting PCC time series...")
-fig, ax = plt.subplots(figsize=(12, 6))
+#plot PCC and RMSE time series
+print("\nPlotting PCC and RMSE time series...")
 
-for model_name, results in sliding_results.items():
+#number of models
+model_names = list(sliding_results.keys())
+n_models = len(model_names)
+
+#color range
+colors = plt.colormaps['tab20'](np.linspace(0, 1, n_models))
+
+#line styles to cycle through
+line_styles = ['-', '--', '-.', ':']
+line_widths = [1.5, 1.5, 1.5, 1.5]
+
+#plotting
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+
+#PCC time series
+for i, (model_name, results) in enumerate(sliding_results.items()):
     if results['windows']:
         window_centers = [(w[0] + w[1]) / 2 for w in results['windows']]
-        ax.plot(window_centers, results['pcc'], alpha=0.5, linewidth=1)
+        color = colors[i % len(colors)]
+        linestyle = line_styles[i % len(line_styles)]
+        linewidth = line_widths[i % len(line_widths)]
+        
+        ax1.plot(window_centers, results['pcc'], 
+                color=color, 
+                linestyle=linestyle, 
+                linewidth=linewidth,
+                alpha=0.8, 
+                label=model_name)
 
-ax.axvline(2002.5, color='red', linestyle='--', alpha=0.7, label='Obs period center')
-ax.set_xlabel('Window center year', fontsize=12)
-ax.set_ylabel('PCC', fontsize=12)
-ax.set_title('Model-observation PCC\n20-year sliding windows (1850-2012)', fontsize=14)
-ax.grid(True, alpha=0.3)
-ax.legend()
-ax.set_ylim(-1, 1)
+#vertical line for observation period
+ax1.axvline(2002.5, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Obs period center')
+ax1.axhline(0, color='gray', linestyle='-', alpha=0.3, linewidth=0.5)
+
+#PCC subplot
+ax1.set_ylabel('PCC', fontsize=12)
+ax1.set_title('Model-observation comparison\n20-year sliding windows (1850-2012)', fontsize=14, fontweight='bold')
+ax1.grid(True, alpha=0.3)
+ax1.set_ylim(min(results['pcc']) - 0.1, max(results['pcc']) + 0.1)
+
+#RMSE time series
+for i, (model_name, results) in enumerate(sliding_results.items()):
+    if results['windows']:
+        window_centers = [(w[0] + w[1]) / 2 for w in results['windows']]
+        color = colors[i % len(colors)]
+        linestyle = line_styles[i % len(line_styles)]
+        linewidth = line_widths[i % len(line_widths)]
+        
+        ax2.plot(window_centers, results['rmse'], 
+                color=color, 
+                linestyle=linestyle, 
+                linewidth=linewidth,
+                alpha=0.8, 
+                label=model_name)
+
+#vertical line for observation period
+ax2.axvline(2002.5, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Obs period center')
+
+#RMSE subplot
+ax2.set_xlabel('Window center year', fontsize=12)
+ax2.set_ylabel('RMSE (mm/yr)', fontsize=12)
+ax2.grid(True, alpha=0.3)
+
+#y-axis limits for RMSE
+rmse_values = []
+for results in sliding_results.values():
+    if results['rmse']:
+        rmse_values.extend(results['rmse'])
+if rmse_values:
+    rmse_min = np.nanmin(rmse_values) * 0.9
+    rmse_max = np.nanmax(rmse_values) * 1.1
+    ax2.set_ylim(rmse_min, rmse_max)
+
+#shared legend
+handles, labels = ax1.get_legend_handles_labels()
+fig.legend(handles, labels, 
+          loc='center left', 
+          bbox_to_anchor=(0.89, 0.5), 
+          fontsize=16, 
+          framealpha=0.9,
+          title='$\\bf{Models}$',
+          title_fontsize=14)
+
+plt.tight_layout()
+plt.subplots_adjust(right=0.88)
+
+#grid lines
+for ax in [ax1, ax2]:
+    ax.grid(True, which='major', linestyle='-', alpha=0.2)
+    ax.minorticks_on()
+
+plt.show()
+
+#best periods for each model
+fig, ax = plt.subplots(figsize=(12, 8))
+
+model_list = []
+best_pcc_windows = []
+best_rmse_windows = []
+
+for model_name, results in sliding_results.items():
+    model_list.append(model_name)
+    
+    if 'best_pcc' in results:
+        best_pcc_windows.append(results['best_pcc']['window'])
+    else:
+        best_pcc_windows.append((np.nan, np.nan))
+        
+    if 'best_rmse' in results:
+        best_rmse_windows.append(results['best_rmse']['window'])
+    else:
+        best_rmse_windows.append((np.nan, np.nan))
+
+#horizontal bars
+y_positions = np.arange(len(model_list))
+bar_height = 0.35
+
+for i, (model, pcc_window, rmse_window) in enumerate(zip(model_list, best_pcc_windows, best_rmse_windows)):
+    #best PCC period
+    if not np.isnan(pcc_window[0]):
+        ax.barh(y_positions[i] - bar_height/2, 
+                pcc_window[1] - pcc_window[0], 
+                left=pcc_window[0], 
+                height=bar_height, 
+                color='red', 
+                alpha=0.7, 
+                label='Best PCC' if i == 0 else "")
+    
+    #best RMSE period
+    if not np.isnan(rmse_window[0]):
+        ax.barh(y_positions[i] + bar_height/2, 
+                rmse_window[1] - rmse_window[0], 
+                left=rmse_window[0], 
+                height=bar_height, 
+                color='black', 
+                alpha=0.7, 
+                label='Best RMSE' if i == 0 else "")
+
+#observation period
+ax.axvspan(1993, 2012, alpha=0.2, color='red', label='Observation period')
+
+#formatting
+ax.set_yticks(y_positions)
+ax.set_yticklabels(model_list)
+ax.set_xlabel('Year', fontsize=12)
+ax.set_title('Best matching 20-year periods by model', fontsize=14, fontweight='bold')
+ax.legend(loc='lower right')
+ax.grid(True, axis='x', alpha=0.3)
+
 plt.tight_layout()
 plt.show()
 
@@ -940,3 +1079,254 @@ for model_name, results in sliding_results.items():
               f"(PCC={results['best_pcc']['pcc']:.3f})")
 
 # %%
+
+# Recreation fig 8. Richter et al. 2017
+
+print("\nCreating model-observation comparison statistics figure...")
+
+#initialize arrays for plotting
+model_names = []
+mean_rmse_all = []
+min_rmse_all = []
+max_rmse_all = []
+obs_period_rmse = []
+
+mean_pcc_all = []
+min_pcc_all = []
+max_pcc_all = []
+obs_period_pcc = []
+
+#statistics for each model
+for model_name, results in sliding_results.items():
+    if results['windows']:
+        model_names.append(model_name)
+        
+        #RMSE
+        rmse_values = [r for r in results['rmse'] if not np.isnan(r)]
+        if rmse_values:
+            mean_rmse_all.append(np.mean(rmse_values))
+            min_rmse_all.append(np.min(rmse_values))
+            max_rmse_all.append(np.max(rmse_values))
+        else:
+            mean_rmse_all.append(np.nan)
+            min_rmse_all.append(np.nan)
+            max_rmse_all.append(np.nan)
+        
+        #PCC
+        pcc_values = [p for p in results['pcc'] if not np.isnan(p)]
+        if pcc_values:
+            mean_pcc_all.append(np.mean(pcc_values))
+            min_pcc_all.append(np.min(pcc_values))
+            max_pcc_all.append(np.max(pcc_values))
+        else:
+            mean_pcc_all.append(np.nan)
+            min_pcc_all.append(np.nan)
+            max_pcc_all.append(np.nan)
+        
+        #observational period statistics (1993-2012)
+        obs_period_trend = model_data_dict[model_name]['period_analysis']['trend_mm_yr']
+        obs_period_stats = calculate_weighted_stats(obs_period_trend, region_mask, data_y=odsl_obs_dynamic)
+        obs_period_rmse.append(obs_period_stats['rmse'])
+        obs_period_pcc.append(obs_period_stats['pcc'])
+
+#sort models by mean RMSE
+model_names_array = np.array(model_names)
+mean_rmse_array = np.array(mean_rmse_all)
+min_rmse_array = np.array(min_rmse_all)
+max_rmse_array = np.array(max_rmse_all)
+obs_period_rmse_array = np.array(obs_period_rmse)
+mean_pcc_array = np.array(mean_pcc_all)
+min_pcc_array = np.array(min_pcc_all)
+max_pcc_array = np.array(max_pcc_all)
+obs_period_pcc_array = np.array(obs_period_pcc)
+
+#sort indices by mean RMSE
+valid_indices = ~np.isnan(mean_rmse_array)
+sort_indices = np.argsort(mean_rmse_array[valid_indices])
+
+#sorting
+model_names = model_names_array[valid_indices][sort_indices].tolist()
+mean_rmse_all = mean_rmse_array[valid_indices][sort_indices].tolist()
+min_rmse_all = min_rmse_array[valid_indices][sort_indices].tolist()
+max_rmse_all = max_rmse_array[valid_indices][sort_indices].tolist()
+obs_period_rmse = obs_period_rmse_array[valid_indices][sort_indices].tolist()
+mean_pcc_all = mean_pcc_array[valid_indices][sort_indices].tolist()
+min_pcc_all = min_pcc_array[valid_indices][sort_indices].tolist()
+max_pcc_all = max_pcc_array[valid_indices][sort_indices].tolist()
+obs_period_pcc = obs_period_pcc_array[valid_indices][sort_indices].tolist()
+
+#ensemble means
+model_names.extend(['Obs Period\nEnsemble', 'Best RMSE\nEnsemble', 'Best PCC\nEnsemble'])
+
+#observational period ensemble stats
+mean_rmse_all.append(stats_obs['rmse'])
+min_rmse_all.append(stats_obs['rmse'])
+max_rmse_all.append(stats_obs['rmse'])
+obs_period_rmse.append(stats_obs['rmse'])
+mean_pcc_all.append(stats_obs['pcc'])
+min_pcc_all.append(stats_obs['pcc'])
+max_pcc_all.append(stats_obs['pcc'])
+obs_period_pcc.append(stats_obs['pcc'])
+
+#best RMSE ensemble stats
+if best_rmse_mean is not None:
+    mean_rmse_all.append(stats_rmse['rmse'])
+    min_rmse_all.append(stats_rmse['rmse'])
+    max_rmse_all.append(stats_rmse['rmse'])
+    obs_period_rmse.append(stats_rmse['rmse'])
+    mean_pcc_all.append(stats_rmse['pcc'])
+    min_pcc_all.append(stats_rmse['pcc'])
+    max_pcc_all.append(stats_rmse['pcc'])
+    obs_period_pcc.append(stats_rmse['pcc'])
+else:
+    mean_rmse_all.extend([np.nan]*1)
+    min_rmse_all.extend([np.nan]*1)
+    max_rmse_all.extend([np.nan]*1)
+    obs_period_rmse.extend([np.nan]*1)
+    mean_pcc_all.extend([np.nan]*1)
+    min_pcc_all.extend([np.nan]*1)
+    max_pcc_all.extend([np.nan]*1)
+    obs_period_pcc.extend([np.nan]*1)
+
+#best PCC ensemble stats
+if best_pcc_mean is not None:
+    mean_rmse_all.append(stats_pcc['rmse'])
+    min_rmse_all.append(stats_pcc['rmse'])
+    max_rmse_all.append(stats_pcc['rmse'])
+    obs_period_rmse.append(stats_pcc['rmse'])
+    mean_pcc_all.append(stats_pcc['pcc'])
+    min_pcc_all.append(stats_pcc['pcc'])
+    max_pcc_all.append(stats_pcc['pcc'])
+    obs_period_pcc.append(stats_pcc['pcc'])
+else:
+    mean_rmse_all.extend([np.nan]*1)
+    min_rmse_all.extend([np.nan]*1)
+    max_rmse_all.extend([np.nan]*1)
+    obs_period_rmse.extend([np.nan]*1)
+    mean_pcc_all.extend([np.nan]*1)
+    min_pcc_all.extend([np.nan]*1)
+    max_pcc_all.extend([np.nan]*1)
+    obs_period_pcc.extend([np.nan]*1)
+
+#plotting
+fig, ax = plt.subplots(figsize=(14, 8))
+x = np.arange(len(model_names))
+width = 0.8
+
+#scaling for shared y-axis
+y_min, y_max = 0, 1
+
+#RMSE range
+rmse_min_val = 0 
+rmse_max_val = max([v for v in max_rmse_all if not np.isnan(v)]) * 1.1
+rmse_range = rmse_max_val - rmse_min_val
+rmse_scale_factor = 0.5 / rmse_range 
+
+#PCC range
+pcc_min_val = min([v for v in min_pcc_all if not np.isnan(v)]) - 0.1
+pcc_max_val = max([v for v in max_pcc_all if not np.isnan(v)]) + 0.1
+pcc_range = pcc_max_val - pcc_min_val
+pcc_scale_factor = 0.5 / pcc_range 
+pcc_offset = 0.5
+
+#scale RMSE values
+mean_rmse_scaled = np.array(mean_rmse_all) * rmse_scale_factor
+min_rmse_scaled = np.array(min_rmse_all) * rmse_scale_factor
+max_rmse_scaled = np.array(max_rmse_all) * rmse_scale_factor
+obs_rmse_scaled = np.array(obs_period_rmse) * rmse_scale_factor
+
+#scale PCC values
+mean_pcc_scaled = (np.array(mean_pcc_all) - pcc_min_val) * pcc_scale_factor + pcc_offset
+min_pcc_scaled = (np.array(min_pcc_all) - pcc_min_val) * pcc_scale_factor + pcc_offset
+max_pcc_scaled = (np.array(max_pcc_all) - pcc_min_val) * pcc_scale_factor + pcc_offset
+obs_pcc_scaled = (np.array(obs_period_pcc) - pcc_min_val) * pcc_scale_factor + pcc_offset
+
+#RMSE bars in lower half
+bars = ax.bar(x, mean_rmse_scaled, width, color='grey', alpha=0.5, edgecolor='black', linewidth=1.5, label='Mean RMSE (modelled)')
+
+#RMSE error bars (min-max range)
+rmse_errors_scaled = [mean_rmse_scaled - min_rmse_scaled, max_rmse_scaled - mean_rmse_scaled]
+ax.errorbar(x, mean_rmse_scaled, yerr=rmse_errors_scaled, fmt='none', color='black', capsize=4, capthick=1.5, label='RMSE range')
+
+#observational period RMSE as black dots
+ax.scatter(x, obs_rmse_scaled, color='black', s=80, zorder=5, label='RMSE (observed)')
+
+#PCC in upper half
+mean_line_plotted = False
+for i, (x_pos, mean_val) in enumerate(zip(x, mean_pcc_scaled)):
+    if not np.isnan(mean_val):
+        if not mean_line_plotted:
+            ax.plot([x_pos - width/4, x_pos + width/4], [mean_val, mean_val], color='red', linewidth=2, zorder=3, label='Mean PCC (modelled)')
+            mean_line_plotted = True
+        else:
+            ax.plot([x_pos - width/4, x_pos + width/4], [mean_val, mean_val], color='red', linewidth=2, zorder=3)
+
+#PCC error bars (min-max range)
+pcc_errors_scaled = [mean_pcc_scaled - min_pcc_scaled, max_pcc_scaled - mean_pcc_scaled]
+ax.errorbar(x, mean_pcc_scaled, yerr=pcc_errors_scaled, fmt='none', color='red', capsize=4, capthick=1.5, label='PCC range')
+
+#observational period PCC as red dots
+ax.scatter(x, obs_pcc_scaled, color='red', s=80, zorder=5, label='PCC (observed)')
+
+#axes
+ax.set_xlabel('Model', fontsize=12)
+ax.set_ylim(y_min, y_max)
+
+#y-axis ticks and labels
+ax2 = ax.twinx()
+ax2.set_ylim(y_min, y_max)
+
+#RMSE left
+rmse_tick_values = np.linspace(rmse_min_val, rmse_max_val, 5)
+rmse_tick_positions = rmse_tick_values * rmse_scale_factor
+ax.set_yticks(rmse_tick_positions)
+ax.set_yticklabels([f'{v:.1f}' for v in rmse_tick_values])
+ax.set_ylabel('RMSE (mm/yr)', fontsize=12, color='black')
+ax.tick_params(axis='y', labelcolor='black')
+
+#PCC right
+pcc_tick_values = np.linspace(pcc_min_val, pcc_max_val, 5)
+pcc_tick_positions = (pcc_tick_values - pcc_min_val) * pcc_scale_factor + pcc_offset
+ax2.set_yticks(pcc_tick_positions)
+ax2.set_yticklabels([f'{v:.1f}' for v in pcc_tick_values])
+ax2.set_ylabel('PCC', fontsize=12, color='red')
+ax2.tick_params(axis='y', labelcolor='red')
+
+#horizontal line to separate RMSE and PCC regions
+ax.axhline(y=0.5, color='gray', linestyle='-', alpha=0.5, linewidth=1.5)
+
+#vertical line between models and ensemble means
+separator_pos = len(model_names) - 3.5
+ax.axvline(separator_pos, color='gray', linestyle='--', alpha=0.7)
+
+#x-axis
+ax.set_xticks(x)
+ax.set_xticklabels(model_names, rotation=45, ha='right')
+
+#title
+ax.set_title('Model-observation comparison of ODSL\nMean statistics over all 20-yr sliding windows (1850-2012)', fontsize=14, pad=20)
+
+#gridlines
+#RMSE
+for tick in rmse_tick_positions:
+    ax.axhline(y=tick, color='gray', linestyle='-', alpha=0.5, linewidth=0.5)
+#PCC
+for tick in pcc_tick_positions:
+    ax.axhline(y=tick, color='gray', linestyle='-', alpha=0.5, linewidth=0.5)
+
+ax.legend(loc='center right', fontsize=10, framealpha=0.9)
+plt.tight_layout()
+plt.show()
+
+#summary table
+print("\nSummary statistics:")
+print("-" * 60)
+print(f"{'Model':<20} | {'Mean RMSE':<8} | {'RMSE Range':<16} | {'Mean PCC':<8} | {'PCC Range':<16}")
+print("-" * 60)
+for i, name in enumerate(model_names):
+    if not np.isnan(mean_rmse_all[i]):
+        print(f"{name:<20} | {mean_rmse_all[i]:>8.2f} | {min_rmse_all[i]:>8.2f} - {max_rmse_all[i]:>8.2f} | "
+              f"{mean_pcc_all[i]:>8.3f} | {min_pcc_all[i]:>8.3f} - {max_pcc_all[i]:>8.3f}")
+
+# %%
+
