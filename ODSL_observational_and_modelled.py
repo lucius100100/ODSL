@@ -116,7 +116,7 @@ common_years = np.intersect1d(alt_years, fr_years)
 print(f"Analysis period: {common_years.min()}-{common_years.max()} ({len(common_years)} years)")
 
 #calculate trends over common period
-trend_sla_alt = duacs_yearly.sla.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1) #MSL proxy   (cm/yr)
+trend_sla_alt = duacs_yearly.sla.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1) #MSL proxy (cm/yr)
 trend_asl_fr = asl_frederikse.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1) #geoid proxy (mm/yr)
 
 #%%
@@ -613,9 +613,9 @@ plt.show()
 
 #%%
 
-### Observed vs. modeled ODSL (1993-2012) ###
+### OBSERVED VS. MODELLED ODSL (1993-2012) ###
 
-print("\nComparing observed and modeled ODSL")
+print("\nComparing observed and modelled ODSL")
 
 #regrid observed to modelled
 print("Creating xesmf regridder...")
@@ -653,7 +653,7 @@ print(f"Area-Weighted PCC in North Atlantic: {pcc_w:.2f}")
 
 #%%
 
-# Plotting observed vs. modeled trend
+# Plotting observed vs. modelled trend
 
 #three subplots
 fig, (ax1, ax2, ax3) = plt.subplots(
@@ -856,7 +856,7 @@ for model_name, model_data in model_data_dict.items():
 
 #%%
 
-#ensemble means following Richter et al. 2017
+# Ensemble means following Richter et al. 2017
 print("\nCreating ensemble means...")
 
 #observational period (1993-2012) ensemble
@@ -884,10 +884,7 @@ best_rmse_mean = xr.concat(best_rmse_trends, dim='model').mean(dim='model') if b
 #statistics for each ensemble
 region_mask = create_region_mask(obs_period_mean, extent)
 
-#%%
-
 #display ensemble means
-
 print("\nEnsemble mean statistics:")
 print("-" * 40)
 
@@ -915,7 +912,7 @@ if best_rmse_mean is not None:
 
 #%%
 
-#plot PCC and RMSE time series
+# Plot PCC and RMSE time series
 print("\nPlotting PCC and RMSE time series...")
 
 #number of models
@@ -927,7 +924,7 @@ colors = plt.colormaps['tab20'](np.linspace(0, 1, n_models))
 
 #line styles to cycle through
 line_styles = ['-', '--', '-.', ':']
-line_widths = [1.5, 1.5, 1.5, 1.5]
+line_widths = [3, 3, 3, 3]
 
 #plotting
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
@@ -992,13 +989,10 @@ if rmse_values:
 
 #shared legend
 handles, labels = ax1.get_legend_handles_labels()
-fig.legend(handles, labels, 
-          loc='center left', 
-          bbox_to_anchor=(0.89, 0.5), 
-          fontsize=16, 
-          framealpha=0.9,
-          title='$\\bf{Models}$',
-          title_fontsize=14)
+leg = fig.legend(handles, labels, loc='center left', bbox_to_anchor=(0.89, 0.5), fontsize=16, framealpha=0.9, title='$\\bf{Models}$', title_fontsize=14)
+for legobj in leg.legend_handles:
+    legobj.set_linewidth(4.0)
+
 
 plt.tight_layout()
 plt.subplots_adjust(right=0.88)
@@ -1030,11 +1024,29 @@ for model_name, results in sliding_results.items():
     else:
         best_rmse_windows.append((np.nan, np.nan))
 
+#sort based on RMSE window center closeness to observed period center
+observed_period = (1993, 2012)
+observed_center = (observed_period[0] + observed_period[1]) / 2
+combined_data = list(zip(model_list, best_pcc_windows, best_rmse_windows))
+
+#sort
+def sort_key(item):
+    rmse_window = item[2]
+    if np.isnan(rmse_window[0]):
+        return float('inf')
+    
+    rmse_center = (rmse_window[0] + rmse_window[1]) / 2
+    return abs(rmse_center - observed_center)
+
+sorted_combined_data = sorted(combined_data, key=sort_key, reverse=True)
+
+sorted_model_list, sorted_pcc_windows, sorted_rmse_windows = zip(*sorted_combined_data)
+
 #horizontal bars
 y_positions = np.arange(len(model_list))
 bar_height = 0.35
 
-for i, (model, pcc_window, rmse_window) in enumerate(zip(model_list, best_pcc_windows, best_rmse_windows)):
+for i, (model, pcc_window, rmse_window) in enumerate(zip(sorted_model_list, sorted_pcc_windows, sorted_rmse_windows)):
     #best PCC period
     if not np.isnan(pcc_window[0]):
         ax.barh(y_positions[i] - bar_height/2, 
@@ -1052,7 +1064,7 @@ for i, (model, pcc_window, rmse_window) in enumerate(zip(model_list, best_pcc_wi
                 left=rmse_window[0], 
                 height=bar_height, 
                 color='black', 
-                alpha=0.7, 
+                alpha=0.7,
                 label='Best RMSE' if i == 0 else "")
 
 #observation period
@@ -1060,8 +1072,9 @@ ax.axvspan(1993, 2012, alpha=0.2, color='red', label='Observation period')
 
 #formatting
 ax.set_yticks(y_positions)
-ax.set_yticklabels(model_list)
+ax.set_yticklabels(sorted_model_list)
 ax.set_xlabel('Year', fontsize=12)
+ax.set_xlim(1900, 2020)
 ax.set_title('Best matching 20-year periods by model', fontsize=14, fontweight='bold')
 ax.legend(loc='lower right')
 ax.grid(True, axis='x', alpha=0.3)
@@ -1246,7 +1259,7 @@ bars = ax.bar(x, mean_rmse_scaled, width, color='grey', alpha=0.5, edgecolor='bl
 
 #RMSE error bars (min-max range)
 rmse_errors_scaled = [mean_rmse_scaled - min_rmse_scaled, max_rmse_scaled - mean_rmse_scaled]
-ax.errorbar(x, mean_rmse_scaled, yerr=rmse_errors_scaled, fmt='none', color='black', capsize=4, capthick=1.5, label='RMSE range')
+ax.errorbar(x, mean_rmse_scaled, yerr=rmse_errors_scaled, fmt='none', color='black', capsize=4, capthick=1.5, label='RMSE range (modelled)')
 
 #observational period RMSE as black dots
 ax.scatter(x, obs_rmse_scaled, color='black', s=80, zorder=5, label='RMSE (observed)')
@@ -1263,7 +1276,7 @@ for i, (x_pos, mean_val) in enumerate(zip(x, mean_pcc_scaled)):
 
 #PCC error bars (min-max range)
 pcc_errors_scaled = [mean_pcc_scaled - min_pcc_scaled, max_pcc_scaled - mean_pcc_scaled]
-ax.errorbar(x, mean_pcc_scaled, yerr=pcc_errors_scaled, fmt='none', color='red', capsize=4, capthick=1.5, label='PCC range')
+ax.errorbar(x, mean_pcc_scaled, yerr=pcc_errors_scaled, fmt='none', color='red', capsize=4, capthick=1.5, label='PCC range (modelled)')
 
 #observational period PCC as red dots
 ax.scatter(x, obs_pcc_scaled, color='red', s=80, zorder=5, label='PCC (observed)')
@@ -1304,7 +1317,7 @@ ax.set_xticks(x)
 ax.set_xticklabels(model_names, rotation=45, ha='right')
 
 #title
-ax.set_title('Model-observation comparison of ODSL\nMean statistics over all 20-yr sliding windows (1850-2012)', fontsize=14, pad=20)
+ax.set_title('Model-observation ODSL comparisonL\nMean statistics over all 20-yr sliding windows (1900-2012)', fontsize=14, pad=20)
 
 #gridlines
 #RMSE
