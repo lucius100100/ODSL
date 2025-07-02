@@ -20,6 +20,7 @@ import matplotlib_inline.backend_inline
 matplotlib_inline.backend_inline.set_matplotlib_formats('retina')
 
 #%%
+
 ### --- OBSERVATIONAL DATA ANALYSIS FOR ODSL --- ###
 #----------------------------------------------------------------------------------------------------------------------#
 # --- Altimetry data ---
@@ -36,9 +37,47 @@ matplotlib_inline.backend_inline.set_matplotlib_formats('retina')
 #----------------------------------------------------------------------------------------------------------------------#
 
 # Observational configuration
-duacs_dir = r'C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\Altimetry\\'
-budget_dir = r'C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\Budget\Frederikse\\'
-gia_dir = r'C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\Budget\GIA\\'
+def find_folder_by_name(folder_name, start_path=None, max_depth=5):
+    """Search for a folder by name, starting from current directory and going up."""
+    if start_path is None:
+        start_path = os.path.dirname(os.path.abspath(__file__))
+    
+    #search upward from current location
+    current = start_path
+    for _ in range(max_depth):
+        for root, dirs, files in os.walk(current):
+            if folder_name in dirs:
+                return os.path.join(root, folder_name)
+        #up one directory
+        current = os.path.dirname(current)
+        if current == os.path.dirname(current): 
+            break
+    
+    raise FileNotFoundError(f"Folder '{folder_name}' not found within {max_depth} levels")
+
+#altimetry
+try:
+    duacs_dir = find_folder_by_name("Altimetry")
+except FileNotFoundError:
+    print("Warning: Altimetry folder not found, trying alternative search...")
+    data_path = find_folder_by_name("Data")
+    duacs_dir = os.path.join(data_path, "Altimetry")
+
+#budget
+try:
+    budget_parent = find_folder_by_name("Budget")
+    budget_dir = os.path.join(budget_parent, "Frederikse")
+    if not os.path.exists(budget_dir):
+        budget_dir = find_folder_by_name("Frederikse")
+except FileNotFoundError:
+    print("Warning: Budget/Frederikse folder not found")
+
+#GIA
+try:
+    gia_dir = find_folder_by_name("GIA")
+except FileNotFoundError:
+    budget_parent = find_folder_by_name("Budget")
+    gia_dir = os.path.join(budget_parent, "GIA")
 fig_dir = './figures/'
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
@@ -59,7 +98,8 @@ def rotate_longitude(ds, name_lon):
 
 # Altimetry data
 print("Loading altimetry data...")
-duacs_ds = xr.open_mfdataset(f'{duacs_dir}cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1M-m_*.nc', combine='by_coords').load()
+duacs_pattern = os.path.join(duacs_dir, 'cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1M-m_*.nc')
+duacs_ds = xr.open_mfdataset(duacs_pattern, combine='by_coords').load()
 duacs_ds = rotate_longitude(duacs_ds, 'longitude')
 duacs_ds['sla'] *= 100  #m to cm
 duacs_yearly = duacs_ds.groupby('time.year').mean()
@@ -70,7 +110,8 @@ print(f"Altimetry range: {duacs_yearly.sla.min().item():.2f} to {duacs_yearly.sl
 
 # Frederikse budget
 print("Loading Frederikse budget data...")
-ds_frederikse = xr.open_dataset(f'{budget_dir}total.nc')
+frederikse_file = os.path.join(budget_dir, 'total.nc')
+ds_frederikse = xr.open_dataset(frederikse_file)
 
 #geocentric sea level = RSL + RAD
 rsl_component = ds_frederikse['total_rsl_mean']  #Relative Sea Level (RSL)          [mm]
@@ -87,8 +128,10 @@ print(f"Geocentric sea level range: {asl_frederikse.min().item():.2f} to {asl_fr
 
 # GIA 
 print("Loading GIA data...")
-gia_rad = xr.open_dataset(f'{gia_dir}drad.1grid_O512.nc')
-gia_sea = xr.open_dataset(f'{gia_dir}dsea.1grid_O512.nc')
+gia_rad_file = os.path.join(gia_dir, 'drad.1grid_O512.nc')
+gia_sea_file = os.path.join(gia_dir, 'dsea.1grid_O512.nc')
+gia_rad = xr.open_dataset(gia_rad_file)
+gia_sea = xr.open_dataset(gia_sea_file)
 
 #process
 gia_rad_da = gia_rad['Drad_250']  # [mm/yr]
@@ -360,11 +403,11 @@ print(f"Observational ODSL figure saved to: {fig_path}")
 #----------------------------------------------------------------------------------------------------------------------#
 
 # Load in CMIP data
-
 #paths
+CMIP_BASE_PATH = find_folder_by_name("CMIP")
 CMIP_BASE_PATHS = {
-    "CMIP5": r"C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\CMIP\CMIP5",
-    "CMIP6": r"C:\Users\luciu\OneDrive - Universiteit Utrecht\Overige documenten\Thesis_KNMI\Data\CMIP\CMIP6"
+    "CMIP5": os.path.join(CMIP_BASE_PATH, "CMIP5"),
+    "CMIP6": os.path.join(CMIP_BASE_PATH, "CMIP6")
 }
 
 def get_scenario_files(cmip_version, scenario, return_models=False):
@@ -1366,4 +1409,3 @@ for i, name in enumerate(model_names):
               f"{mean_pcc_all[i]:>8.3f} | {min_pcc_all[i]:>8.3f} - {max_pcc_all[i]:>8.3f}")
 
 # %%
-
