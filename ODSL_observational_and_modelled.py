@@ -1004,30 +1004,36 @@ for ax in [ax1, ax2]:
 
 plt.show()
 
-#best periods for each model
+#best periods for each model (bars and values)
 fig, ax = plt.subplots(figsize=(12, 8))
 
 model_list = []
 best_pcc_windows = []
 best_rmse_windows = []
+best_pcc_values = []
+best_rmse_values = []
 
 for model_name, results in sliding_results.items():
     model_list.append(model_name)
     
     if 'best_pcc' in results:
         best_pcc_windows.append(results['best_pcc']['window'])
+        best_pcc_values.append(results['best_pcc']['pcc'])
     else:
         best_pcc_windows.append((np.nan, np.nan))
+        best_pcc_values.append(np.nan)
         
     if 'best_rmse' in results:
         best_rmse_windows.append(results['best_rmse']['window'])
+        best_rmse_values.append(results['best_rmse']['rmse'])
     else:
         best_rmse_windows.append((np.nan, np.nan))
+        best_rmse_values.append(np.nan)
 
 #sort based on RMSE window center closeness to observed period center
 observed_period = (1993, 2012)
 observed_center = (observed_period[0] + observed_period[1]) / 2
-combined_data = list(zip(model_list, best_pcc_windows, best_rmse_windows))
+combined_data = list(zip(model_list, best_pcc_windows, best_rmse_windows, best_pcc_values, best_rmse_values))
 
 #sort
 def sort_key(item):
@@ -1040,15 +1046,18 @@ def sort_key(item):
 
 sorted_combined_data = sorted(combined_data, key=sort_key, reverse=True)
 
-sorted_model_list, sorted_pcc_windows, sorted_rmse_windows = zip(*sorted_combined_data)
+sorted_model_list, sorted_pcc_windows, sorted_rmse_windows, sorted_pcc_values, sorted_rmse_values = zip(*sorted_combined_data)
 
 #horizontal bars
 y_positions = np.arange(len(model_list))
 bar_height = 0.35
 
-for i, (model, pcc_window, rmse_window) in enumerate(zip(sorted_model_list, sorted_pcc_windows, sorted_rmse_windows)):
+for i, (model, pcc_window, rmse_window, pcc_value, rmse_value) in enumerate(
+    zip(sorted_model_list, sorted_pcc_windows, sorted_rmse_windows, sorted_pcc_values, sorted_rmse_values)
+):
     #best PCC period
     if not np.isnan(pcc_window[0]):
+        #bar
         ax.barh(y_positions[i] - bar_height/2, 
                 pcc_window[1] - pcc_window[0], 
                 left=pcc_window[0], 
@@ -1056,9 +1065,17 @@ for i, (model, pcc_window, rmse_window) in enumerate(zip(sorted_model_list, sort
                 color='red', 
                 alpha=0.7, 
                 label='Best PCC' if i == 0 else "")
+        
+        #value text
+        bar_center = (pcc_window[0] + pcc_window[1]) / 2
+        ax.text(bar_center, y_positions[i] - bar_height/2, 
+                f'{pcc_value:.2f}', 
+                ha='center', va='center', 
+                color='white', fontweight='bold', fontsize=10)
     
     #best RMSE period
     if not np.isnan(rmse_window[0]):
+        #bar
         ax.barh(y_positions[i] + bar_height/2, 
                 rmse_window[1] - rmse_window[0], 
                 left=rmse_window[0], 
@@ -1066,6 +1083,13 @@ for i, (model, pcc_window, rmse_window) in enumerate(zip(sorted_model_list, sort
                 color='black', 
                 alpha=0.7,
                 label='Best RMSE' if i == 0 else "")
+        
+        #value text
+        bar_center = (rmse_window[0] + rmse_window[1]) / 2
+        ax.text(bar_center, y_positions[i] + bar_height/2, 
+                f'{rmse_value:.2f}', 
+                ha='center', va='center', 
+                color='white', fontweight='bold', fontsize=10)
 
 #observation period
 ax.axvspan(1993, 2012, alpha=0.2, color='red', label='Observation period')
