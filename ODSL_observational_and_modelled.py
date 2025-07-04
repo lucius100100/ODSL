@@ -662,15 +662,13 @@ print("\nComparing observed and modelled ODSL")
 
 #regrid observed to modelled
 print("Creating xesmf regridder...")
-regridder = xe.Regridder(
-    odsl_mm_yr,           
-    model_mean_trend,     
-    'bilinear',          
-    periodic=True
-)
+regridder = xe.Regridder(odsl_mm_yr, model_mean_trend, 'bilinear', periodic=True)
 
 print("Regridding observed data to match model grid...")
 odsl_observed_regridded = regridder(odsl_mm_yr)
+
+#statistics for regridded observed ODSL (before removing global mean)
+stats_obs_regridded = calculate_weighted_stats(odsl_observed_regridded, region_mask)
 
 #removing global mean trend from observed ODSL (CMIP is anomaly field)
 print("Removing global mean trend from observed ODSL...")
@@ -739,7 +737,8 @@ ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.
 #title and layout
 fig.suptitle(
     f'Observed vs. modeled ODSL trend ({start_year}-{end_year})\n'
-    f'North Atlantic PCC = {pcc_w:.2f}',
+    f'North Atlantic PCC = {pcc_w:.2f}\n'
+    f'Global mean = 0',
     fontsize=16, y=1.02
 )
 
@@ -753,7 +752,7 @@ plt.show()
 
 # %%
 
-# --- SLIDING WINDOW ANALYSIS --- # 
+### --- SLIDING WINDOW ANALYSIS --- ### 
 # Richter et al. 2017, Chapter 2. Data and methods, d. Methods
 
 #regrid observations to model grid
@@ -1093,7 +1092,7 @@ sorted_model_list, sorted_pcc_windows, sorted_rmse_windows, sorted_pcc_values, s
 
 #horizontal bars
 y_positions = np.arange(len(model_list))
-bar_height = 0.35
+bar_height = 0.4
 
 for i, (model, pcc_window, rmse_window, pcc_value, rmse_value) in enumerate(
     zip(sorted_model_list, sorted_pcc_windows, sorted_rmse_windows, sorted_pcc_values, sorted_rmse_values)
