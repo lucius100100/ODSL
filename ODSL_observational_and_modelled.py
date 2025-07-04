@@ -667,9 +667,6 @@ regridder = xe.Regridder(odsl_mm_yr, model_mean_trend, 'bilinear', periodic=True
 print("Regridding observed data to match model grid...")
 odsl_observed_regridded = regridder(odsl_mm_yr)
 
-#statistics for regridded observed ODSL (before removing global mean)
-stats_obs_regridded = calculate_weighted_stats(odsl_observed_regridded, region_mask)
-
 #removing global mean trend from observed ODSL (CMIP is anomaly field)
 print("Removing global mean trend from observed ODSL...")
 
@@ -704,7 +701,7 @@ fig, (ax1, ax2, ax3) = plt.subplots(
 )
 
 vmax_unified = max(
-    abs(odsl_observed_regridded.quantile(0.98, skipna=True).item()),
+    abs(odsl_obs_dynamic_trend.quantile(0.98, skipna=True).item()),
     abs(model_mean_trend.quantile(0.98, skipna=True).item()),
     abs(difference.quantile(0.98, skipna=True).item())
 )
@@ -712,7 +709,7 @@ vmin_unified = -vmax_unified
 
 #subplot 1: observed ODSL
 add_map_features(ax1, is_left=True, is_bottom=True)
-mesh1 = odsl_observed_regridded.plot.pcolormesh(
+mesh1 = odsl_obs_dynamic_trend.plot.pcolormesh(
     ax=ax1, transform=ccrs.PlateCarree(), cmap='coolwarm',
     vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False
 )
