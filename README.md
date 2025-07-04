@@ -41,7 +41,7 @@ This repository contains code for analyzing Ocean Dynamic Sea Level (ODSL) using
    - Scenarios: historical, RCP2.6, RCP4.5, RCP8.5
    - [Preprocessing Code](https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py)
 
-### Directory Structure
+### Data Directory Structure
 
 ```
 Data/
