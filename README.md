@@ -54,7 +54,7 @@ Data/
 │       ├── drad.1grid_O512.nc
 │       └── dsea.1grid_O512.nc
 └── CMIP/
-    └── CMIP5/
+    ├── CMIP5/
     │   ├── cmip5_zos_historical/
     │   ├── cmip5_zos_rcp26/
     │   ├── cmip5_zos_rcp45/
