@@ -166,7 +166,7 @@ If you use this code in your research, please cite:
 }
 ```
 
-## References
+## Data References
 
 1. **Richter, K., Riva, R. E., & Drange, H. (2017)**. Impact of self-attraction and loading effects induced by shelf mass loading on projected regional sea level rise. *Geophysical Research Letters*, 44(3), 1466-1475.
 
