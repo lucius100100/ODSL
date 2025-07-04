@@ -125,11 +125,6 @@ North Atlantic:
 - Longitude: -65° to 40°
 - Latitude: 50° to 80°
 
-### Time Periods
-
-- Observational period: 1993-2012
-- Sliding window analysis: 1850-2012 (20-year windows)
-
 ## License
 
 This project is licensed under the MIT License - see below:
@@ -137,7 +132,7 @@ This project is licensed under the MIT License - see below:
 ```
 MIT License
 
-Copyright (c) 2024 [Your Name]
+Copyright (c) 2024 Luc van Dijk
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -164,10 +159,10 @@ If you use this code in your research, please cite:
 
 ```bibtex
 @software{odsl_analysis_2024,
-  author = {[Your Name]},
+  author = {Luc van Dijk},
   title = {Ocean Dynamic Sea Level (ODSL) Analysis},
-  year = {2024},
-  url = {https://github.com/[your-username]/odsl-analysis}
+  year = {2025},
+  url = {https://github.com/lucius100100/ODSL}
 }
 ```
 
