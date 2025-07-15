@@ -22,19 +22,19 @@ matplotlib_inline.backend_inline.set_matplotlib_formats('retina')
 #%%
 
 ### --- OBSERVATIONAL DATA ANALYSIS FOR ODSL --- ###
-#----------------------------------------------------------------------------------------------------------------------#
+#----------------------------------------------------------------------------------------#
 # --- Altimetry data ---
 # DOI: 10.48670/moi-00148
 # Link to data: https://data.marine.copernicus.eu/product/SEALEVEL_GLO_PHY_L4_MY_008_047/description
-#----------------------------------------------------------------------------------------------------------------------#
+#----------------------------------------------------------------------------------------#
 # --- Budget data ---
 # Frederikse, T., Landerer, F., Caron, L., Adhikari, S., Parkes, D., Humphrey, V. W., ... & Wu, Y. H. (2020). The causes of sea-level rise since 1900. Nature, 584(7821), 393-397.
 # Link to data: https://zenodo.org/records/3862995
-#----------------------------------------------------------------------------------------------------------------------#
+#----------------------------------------------------------------------------------------#
 # --- GIA data ---
 # Peltier, W. R., Argus, D. F., & Drummond, R. (2015). Space geodesy constrains ice age terminal deglaciation: The global ICE‐6G_C (VM5a) model. Journal of Geophysical Research: Solid Earth, 120(1), 450-487.
 # Link to data: https://www.atmosp.physics.utoronto.ca/~peltier/data.php
-#----------------------------------------------------------------------------------------------------------------------#
+#----------------------------------------------------------------------------------------#
 
 # Observational configuration
 def find_folder_by_name(folder_name, start_path=None, max_depth=5):
@@ -397,10 +397,10 @@ print(f"Observational ODSL figure saved to: {fig_path}")
 #%%
 
 ### --- CMIP DATA ANALYSIS FOR ODSL --- ###
-#----------------------------------------------------------------------------------------------------------------------#
+#----------------------------------------------------------------------------------------#
 # Preprocessing done by Dewi Le Bars, KNMI
 # https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py
-#----------------------------------------------------------------------------------------------------------------------#
+#----------------------------------------------------------------------------------------#
 
 # Load in CMIP data
 #paths
@@ -466,10 +466,6 @@ for scenario in cmip5_scenarios:
     #dictionary for easy lookup: {model_name: filepath}
     all_files[scenario] = {model: file for model, file in zip(models, files)}
     all_models.update(models)
-
-#sort models
-sorted_models = sorted(list(all_models))
-print(f"Found {len(sorted_models)} unique models to process.")
 
 # %%
 
@@ -735,7 +731,7 @@ ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.
 fig.suptitle(
     f'Observed vs. modeled ODSL trend ({start_year}-{end_year})\n'
     f'North Atlantic PCC = {pcc_w:.2f}\n'
-    f'Global mean = 0',
+    f'Anomalies (global mean removed from observations)',
     fontsize=16, y=1.02
 )
 
@@ -989,7 +985,7 @@ ax1.axhline(0, color='gray', linestyle='-', alpha=0.3, linewidth=0.5)
 
 #PCC subplot
 ax1.set_ylabel('PCC', fontsize=12)
-ax1.set_title('Model-observation comparison\n20-year sliding windows (1850-2012)', fontsize=14, fontweight='bold')
+ax1.set_title('Model-observation comparison\n20-year sliding windows (1900-2012)', fontsize=14, fontweight='bold')
 ax1.grid(True, alpha=0.3)
 ax1.set_ylim(min(results['pcc']) - 0.1, max(results['pcc']) + 0.1)
 
@@ -1156,7 +1152,7 @@ for model_name, results in sliding_results.items():
 
 # %%
 
-# Recreation fig 8. Richter et al. 2017
+# Recreation fig. 8 Richter et al. 2017
 
 print("\nCreating model-observation comparison statistics figure...")
 
@@ -1380,7 +1376,7 @@ ax.set_xticks(x)
 ax.set_xticklabels(model_names, rotation=45, ha='right')
 
 #title
-ax.set_title('Model-observation ODSL comparisonL\nMean statistics over all 20-yr sliding windows (1900-2012)', fontsize=14, pad=20)
+ax.set_title('Model-observation ODSL comparison\nMean statistics over all 20-yr sliding windows (1900-2012)', fontsize=14, pad=20)
 
 #gridlines
 #RMSE

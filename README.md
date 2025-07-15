@@ -4,6 +4,26 @@
 
 This repository contains code for analyzing Ocean Dynamic Sea Level (ODSL) using both observational data and CMIP model outputs. The analysis extends on the methodology outlined in Richter et al. (2017).
 
+## Usage
+
+# First run (computes everything)
+
+python odsl_analysis.py
+
+# Subsequent runs (uses cache)
+
+python odsl_analysis.py
+
+# Force recompute
+
+# Edit config.py: FORCE_RECOMPUTE = True
+
+python odsl_analysis.py
+
+# Clear cache
+
+rm -rf cache/*
+
 ## Features
 
 - **Observational ODSL Calculation**: Combines altimetry, geoid, and GIA data
@@ -73,30 +93,25 @@ Data/
 - Python 3.8+
 - Conda or pip for package management
 
-### Required Packages
-
-```bash
-# Core packages
-pandas
-numpy
-xarray
-xesmf  # For regridding
-cartopy  # For map projections
-matplotlib
-
-# Additional dependencies
-glob
-os
-```
-
 ## Project Structure
 
 ```
-odsl-analysis/
-├── ODSL_observational_and_modelled.py  # Main analysis script
-├── figures/                            # Output directory for figures
-└── README.md                           # This file
+ODSL/
+├── odsl_analysis.py      # Main analysis script
+├── data_loader.py        # Data loading functions with caching
+├── utils.py              # Utility functions and cache management
+├── config.py             # Configuration parameters
+├── plotting.py           # Plotting
+├── cache/                # Cached intermediate results (auto-created)
+├── figures/              # Output directory for figures (auto-created)
+└── README.md             # This file
 ```
+
+## Cache Size
+
+Total cache size: ~2-6 GB
+First run: 20-30 minutes
+Cached runs: <1 minute
 
 ## Methodology
 
@@ -107,6 +122,7 @@ ODSL = MSL - Geoid - GIA
 ```
 
 Where:
+
 - **MSL**: Mean Sea Level from altimetry
 - **Geoid**: Geoid change from Frederikse budget
 - **GIA**: Glacial Isostatic Adjustment
@@ -121,7 +137,8 @@ Following Richter et al. (2017), the analysis uses area-weighted statistics acco
 
 ### Region of Interest
 
-North Atlantic: 
+North Atlantic:
+
 - Longitude: -65° to 40°
 - Latitude: 50° to 80°
 
@@ -178,6 +195,6 @@ If you use this code in your research, please cite:
 
 ## Contact
 
-Luc van Dijk - l.g.vandijk1@students.uu.nl ; luc.van.dijk@knmi.nl
+Luc van Dijk - <l.g.vandijk1@students.uu.nl> ; <luc.van.dijk@knmi.nl>
 
 Project Link: [https://github.com/lucius100100/ODSL](https://github.com/lucius100100/ODSL)

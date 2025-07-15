@@ -1,2 +1,9 @@
-# Ignore the figures directory
+#ignore the figures directory
 figures/
+
+#ignore the cache directory
+cache/
+__pycache__/
+
+#ignore old code version
+ODSL_observational_and_modelled.py

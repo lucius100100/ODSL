@@ -1,2 +1,19 @@
-# Auto detect text files and perform LF normalization
+#auto detect text files and perform LF normalization
 * text=auto
+
+#handle binary files to prevent corruption.
+
+#data Files
+*.nc      binary
+*.csv     -text
+*.xlsx    binary
+*.json    -text
+
+#image Files
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.pdf     binary
+
+#cache Files
+*.pkl     binary
