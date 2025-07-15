@@ -16,7 +16,7 @@ python odsl_analysis.py
 
 # Force recompute
 
-# Edit config.py: FORCE_RECOMPUTE = True
+### Edit config.py: FORCE_RECOMPUTE = True
 
 python odsl_analysis.py
 
