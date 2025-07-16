@@ -1,3 +1,24 @@
+### --- OBSERVATIONAL DATA --- ###
+#----------------------------------------------------------------------------------------#
+# --- Altimetry data ---
+# DOI: 10.48670/moi-00148
+# Link to data: https://data.marine.copernicus.eu/product/SEALEVEL_GLO_PHY_L4_MY_008_047/description
+#----------------------------------------------------------------------------------------#
+# --- Budget data ---
+# Frederikse, T., Landerer, F., Caron, L., Adhikari, S., Parkes, D., Humphrey, V. W., ... & Wu, Y. H. (2020). The causes of sea-level rise since 1900. Nature, 584(7821), 393-397.
+# Link to data: https://zenodo.org/records/3862995
+#----------------------------------------------------------------------------------------#
+# --- GIA data ---
+# Peltier, W. R., Argus, D. F., & Drummond, R. (2015). Space geodesy constrains ice age terminal deglaciation: The global ICE‐6G_C (VM5a) model. Journal of Geophysical Research: Solid Earth, 120(1), 450-487.
+# Link to data: https://www.atmosp.physics.utoronto.ca/~peltier/data.php
+#----------------------------------------------------------------------------------------#
+
+### --- CMIP DATA --- ###
+#----------------------------------------------------------------------------------------#
+# Preprocessing done by Dewi Le Bars, KNMI
+# https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py
+#----------------------------------------------------------------------------------------#
+
 import xarray as xr
 import os
 import glob

@@ -6,21 +6,20 @@ This repository contains code for analyzing Ocean Dynamic Sea Level (ODSL) using
 
 ## Usage
 
-# First run (computes everything)
+### First run (computes everything)
 
 python odsl_analysis.py
 
-# Subsequent runs (uses cache)
+### Subsequent runs (uses cache)
 
 python odsl_analysis.py
 
-# Force recompute
+### Force recompute
 
-### Edit config.py: FORCE_RECOMPUTE = True
-
+Edit config.py: FORCE_RECOMPUTE = True
 python odsl_analysis.py
 
-# Clear cache
+### Clear cache
 
 rm -rf cache/*
 
@@ -34,8 +33,6 @@ rm -rf cache/*
 - **Visualization**: Generates publication-quality figures
 
 ## Data Requirements
-
-### Observational Data
 
 1. **Altimetry Data**
    - Source: DUACS/CMEMS
@@ -53,8 +50,6 @@ rm -rf cache/*
    - Files: `drad.1grid_O512.nc`, `dsea.1grid_O512.nc`
    - [Download Link](https://www.atmosp.physics.utoronto.ca/~peltier/data.php)
 
-### Model Data
-
 4. **CMIP Data**
    - Preprocessed by Dewi Le Bars (KNMI)
    - Variable: `zos` (sea surface height)
@@ -63,7 +58,7 @@ rm -rf cache/*
 
 ### Data Directory Structure
 
-```
+```text
 Data/
 ├── Altimetry/
 │   └── cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1M-m_*.nc
@@ -95,7 +90,7 @@ Data/
 
 ## Project Structure
 
-```
+```text
 ODSL/
 ├── odsl_analysis.py      # Main analysis script
 ├── data_loader.py        # Data loading functions with caching
@@ -104,6 +99,7 @@ ODSL/
 ├── plotting.py           # Plotting
 ├── cache/                # Cached intermediate results (auto-created)
 ├── figures/              # Output directory for figures (auto-created)
+├── requirements.txt      # Package requirements
 └── README.md             # This file
 ```
 
@@ -117,7 +113,7 @@ Cached runs: <1 minute
 
 ### ODSL Calculation
 
-```
+```text
 ODSL = MSL - Geoid - GIA
 ```
 
@@ -146,7 +142,7 @@ North Atlantic:
 
 This project is licensed under the MIT License - see below:
 
-```
+```text
 MIT License
 
 Copyright (c) 2024 Luc van Dijk
