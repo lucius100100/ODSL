@@ -630,8 +630,11 @@ def plot_observed_variability(obs_results, fig_dir):
     variability = obs_results['variability']
     common_years = np.array(obs_results.attrs['common_years_list'])
 
+    vmax = variability.quantile(0.98, skipna=True).item()
+    vmin = variability.quantile(0.02, skipna=True).item()
+
     #plotting
-    mesh = variability.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], add_colorbar=False)
+    mesh = variability.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=vmin, vmax=vmax, add_colorbar=False)
     
     #colorbar
     cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)

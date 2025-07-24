@@ -270,7 +270,7 @@ def perform_sliding_window_analysis():
             detrended_window = window_data - fit_var
             variability_map = detrended_window.std(dim='time')
             
-            # Center the modeled variability map by removing its region-wide mean
+            #center the modeled variability
             mean_var_model = variability_map.weighted(weights).mean().item()
             variability_map_centered = variability_map - mean_var_model
 
