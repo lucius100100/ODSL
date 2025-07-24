@@ -1,11 +1,32 @@
+from pathlib import Path
+
 #parameters
-START_YEAR = 1993           #observed period
+START_YEAR = 1993               #observed period
 END_YEAR = 2012
-EXTENT = [-65, 40, 50, 80]  #North Atlantic
+EXTENT = [-65, 40, 50, 80]      #North Atlantic
 
 #cache settings
 USE_CACHE = True
 FORCE_RECOMPUTE = False
+
+#variability calculation method
+VARIABILITY_DETREND_DEGREE = 4  #1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
+
+#what to plot
+PLOT_VARIABLE = 'variability'   #'trend', 'variability'
+
+PLOT_CONFIG = {
+    'trend': {
+        'name': 'Trend',
+        'units': 'mm/yr',
+        'cmap': 'coolwarm'
+    },
+    'variability': {
+        'name': 'Variability',
+        'units': 'cm',
+        'cmap': 'viridis'
+    }
+}
 
 #projection
 PROJECTION_PARAMS = {
@@ -13,6 +34,23 @@ PROJECTION_PARAMS = {
     'central_latitude': 60.0,
     'standard_parallels': (55.0, 75.0)
 }
+
+#CMIP scenarios
+CMIP_SCENARIOS = {
+    "CMIP5": {
+        "historical": "cmip5_zos_historical",
+        "rcp26": "cmip5_zos_rcp26",
+        "rcp45": "cmip5_zos_rcp45",
+        "rcp85": "cmip5_zos_rcp85"
+    },
+    "CMIP6": {
+        "historical": "cmip6_zos_historical",
+        "ssp126": "cmip6_zos_ssp126",
+        "ssp245": "cmip6_zos_ssp245",
+        "ssp585": "cmip6_zos_ssp585"
+    }
+}
+
 
 #target models from supplementary material table 1 Richter et al. 2017
 TARGET_CMIP5_MODELS = [

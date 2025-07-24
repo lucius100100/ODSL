@@ -109,35 +109,6 @@ Total cache size: ~2-6 GB
 First run: 20-30 minutes
 Cached runs: <1 minute
 
-## Methodology
-
-### ODSL Calculation
-
-```text
-ODSL = MSL - Geoid - GIA
-```
-
-Where:
-
-- **MSL**: Mean Sea Level from altimetry
-- **Geoid**: Geoid change from Frederikse budget
-- **GIA**: Glacial Isostatic Adjustment
-
-### Area-Weighted Statistics
-
-Following Richter et al. (2017), the analysis uses area-weighted statistics accounting for latitude-dependent grid cell areas:
-
-- Weights: `w = cos(latitude)`
-- Unbiased variance correction factor
-- Area-weighted mean, variance, RMSE, and PCC
-
-### Region of Interest
-
-North Atlantic:
-
-- Longitude: -65° to 40°
-- Latitude: 50° to 80°
-
 ## License
 
 This project is licensed under the MIT License - see below:

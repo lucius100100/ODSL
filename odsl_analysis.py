@@ -11,12 +11,10 @@ import pandas as pd
 import traceback
 from scipy import stats
 
-from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, 
-                        load_cmip_model_data, load_multiple_cmip_models, get_cmip_files_inventory, find_folder_by_name)
-from utils import cache_result, calculate_weighted_stats, create_region_mask, rotate_longitude
+from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, load_multiple_cmip_models, get_cmip_files_inventory, find_folder_by_name)
+from utils import (cache_result, calculate_weighted_stats, create_region_mask, rotate_longitude, detrend_timeseries)
 from plotting import create_all_figures 
-from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, 
-                   TARGET_CMIP5_MODELS)
+from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, TARGET_CMIP5_MODELS, CMIP_SCENARIOS, VARIABILITY_DETREND_DEGREE)
 
 #figures directory
 fig_dir = './figures/'
@@ -69,6 +67,11 @@ def calculate_observed_odsl():
     
     print(f"ODSL range: {odsl_mm_yr.min().item():.2f} to {odsl_mm_yr.max().item():.2f} mm/yr")
     
+    #variability
+    sla_period = duacs_yearly.sla.sel(year=common_years)
+    detrended_sla = detrend_timeseries(sla_period, degree=VARIABILITY_DETREND_DEGREE, dim='year')
+    observed_variability = detrended_sla.std(dim='year')
+
     #clean up regridders
     try:
         regridder_frederikse.clean_weight_file()
@@ -82,6 +85,7 @@ def calculate_observed_odsl():
             'msl': trend_sla_alt_mm_yr,
             'geoid': trend_asl_fr_regridded_mm_yr,
             'gia': gia_regridded_mm_yr,
+            'variability': observed_variability,
         }
     )
 
@@ -103,6 +107,7 @@ def process_cmip5_models():
     #initialize
     model_names = []
     trends_list = []
+    variability_list = []
     full_timeseries_list = []
     region_masks_list = []
     trend_stats_list = []
@@ -124,11 +129,16 @@ def process_cmip5_models():
                 slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
                 slope_mm_yr = slope * 10
                 
+                #variability
+                detrended_data = detrend_timeseries(period_data, degree=VARIABILITY_DETREND_DEGREE, dim='time')
+                model_variability = detrended_data.std(dim='time')
+
                 trend_stats = calculate_weighted_stats(slope_mm_yr, region_mask)
                 
                 #append results
                 model_names.append(model_name)
                 trends_list.append(slope_mm_yr)
+                variability_list.append(model_variability)
                 full_timeseries_list.append(combined_zos)
                 region_masks_list.append(region_mask)
                 trend_stats_list.append(trend_stats)
@@ -140,6 +150,7 @@ def process_cmip5_models():
 
     #concatenate
     model_trends = xr.concat(trends_list, dim=pd.Index(model_names, name='model'))
+    model_variability = xr.concat(variability_list, dim=pd.Index(model_names, name='model'))
     full_timeseries = xr.concat(full_timeseries_list, dim=pd.Index(model_names, name='model'))
     region_masks = xr.concat(region_masks_list, dim=pd.Index(model_names, name='model'))
 
@@ -149,12 +160,15 @@ def process_cmip5_models():
     
     #multi-model mean
     model_mean_trend = model_trends.mean(dim='model', skipna=True)
+    model_mean_variability = model_variability.mean(dim='model', skipna=True)
     
     #dataset object
     output_ds = xr.Dataset(
         {
             'model_trend': model_trends,
             'model_mean_trend': model_mean_trend,
+            'model_variability': model_variability,
+            'model_mean_variability': model_mean_variability,
             'full_timeseries': full_timeseries,
             'region_mask': region_masks.astype('int8'),
             'trend_mean': trend_means,
@@ -163,7 +177,7 @@ def process_cmip5_models():
     )
     
     #global attributes
-    output_ds.attrs['description'] = "Processed CMIP5 model trends and timeseries."
+    output_ds.attrs['description'] = "Processed CMIP5 model trends, variability, and timeseries."
     output_ds.attrs['valid_models_count'] = len(model_names)
     
     return output_ds
@@ -184,6 +198,11 @@ def perform_sliding_window_analysis():
     regridder_obs_to_model = xe.Regridder(odsl_mm_yr, sample_model_grid, 'bilinear', periodic=True)
     odsl_mm_yr_regridded = regridder_obs_to_model(odsl_mm_yr)
     
+    #variability
+    odsl_var_obs = obs_results['variability']
+    regridder_var_to_model = xe.Regridder(odsl_var_obs, sample_model_grid, 'bilinear', periodic=True)
+    odsl_var_obs_regridded = regridder_var_to_model(odsl_var_obs)
+
     try:
         regridder_obs_to_model.clean_weight_file()
     except AttributeError:
@@ -191,12 +210,24 @@ def perform_sliding_window_analysis():
     
     #remove global mean from observations
     weights = np.cos(np.deg2rad(odsl_mm_yr_regridded.latitude))
+
+    #centered trend
     global_mean = odsl_mm_yr_regridded.weighted(weights).mean(dim=("latitude", "longitude")).item()
     odsl_obs_dynamic = odsl_mm_yr_regridded - global_mean
+
+    #centered variability
+    mean_var_obs = odsl_var_obs_regridded.weighted(weights).mean(dim=("latitude", "longitude")).item()
+    odsl_var_obs_centered = odsl_var_obs_regridded - mean_var_obs
     
     #sliding window analysis for each model
     all_pcc = []
     all_rmse = []
+    all_mean_trends = []
+    all_trends = []
+    all_pcc_var = []
+    all_rmse_var = []
+    all_mean_variability = []
+    all_variability = []
     all_windows = []
     model_names_for_sliding = []
     
@@ -208,12 +239,18 @@ def perform_sliding_window_analysis():
         
         pcc_per_model = []
         rmse_per_model = []
+        mean_trends_per_model = []
+        trends_per_model = []
+        mean_variability_per_model = []
+        variability_per_model = []
+        pcc_var_per_model = []
+        rmse_var_per_model = []
         windows_per_model = []
 
         #slide window
         window_size = 20
         start_year = 1850
-        end_year = 2012
+        end_year = END_YEAR
         
         for window_start in range(start_year, end_year - window_size + 1):
             window_end = window_start + window_size - 1
@@ -227,33 +264,72 @@ def perform_sliding_window_analysis():
             trend_coeffs = window_data.polyfit(dim='time', deg=1)
             trend_mm_yr = trend_coeffs.polyfit_coefficients.sel(degree=1) * 10
             
+            #variability
+            p_var = window_data.polyfit(dim='time', deg=1)
+            fit_var = xr.polyval(window_data['time'], p_var.polyfit_coefficients)
+            detrended_window = window_data - fit_var
+            variability_map = detrended_window.std(dim='time')
+            
+            # Center the modeled variability map by removing its region-wide mean
+            mean_var_model = variability_map.weighted(weights).mean().item()
+            variability_map_centered = variability_map - mean_var_model
+
             #statistics
             stats = calculate_weighted_stats(trend_mm_yr, region_mask, data_y=odsl_obs_dynamic)
-            
+            stats_var = calculate_weighted_stats(variability_map_centered, region_mask, data_y=odsl_var_obs_centered)
+            stats_abs_var = calculate_weighted_stats(variability_map, region_mask)
+
+            #append
             windows_per_model.append(window_start)
             pcc_per_model.append(stats['pcc'])
             rmse_per_model.append(stats['rmse'])
+            mean_trends_per_model.append(stats['mean_x'])
+            trends_per_model.append(trend_mm_yr)
+            mean_variability_per_model.append(stats_abs_var['mean_x'])
+            variability_per_model.append(variability_map)
+            pcc_var_per_model.append(stats_var['pcc'])
+            rmse_var_per_model.append(stats_var['rmse'])
         
+        model_trends_da = xr.concat(trends_per_model, dim=pd.Index(windows_per_model, name='window_start_year'))
+        all_trends.append(model_trends_da)
+        model_variability_da = xr.concat(variability_per_model, dim=pd.Index(windows_per_model, name='window_start_year'))
+        all_variability.append(model_variability_da)
         model_names_for_sliding.append(model_name)
         all_pcc.append(pcc_per_model)
         all_rmse.append(rmse_per_model)
+        all_mean_trends.append(mean_trends_per_model)
+        all_mean_variability.append(mean_variability_per_model)
+        all_pcc_var.append(pcc_var_per_model)
+        all_rmse_var.append(rmse_var_per_model)
         
         if not all_windows:
             all_windows = windows_per_model
-            
+
+    final_trends_da = xr.concat(all_trends, dim=pd.Index(model_names_for_sliding, name='model'))
+    final_variability_da = xr.concat(all_variability, dim=pd.Index(model_names_for_sliding, name='model'))
+
     #assemble
     output_ds = xr.Dataset(
         {
             'pcc': (('model', 'window_start_year'), all_pcc),
             'rmse': (('model', 'window_start_year'), all_rmse),
-            'odsl_obs_dynamic': odsl_obs_dynamic, 
+            'mean_trend': (('model', 'window_start_year'), all_mean_trends),
+            'sliding_trends': final_trends_da,
+            'mean_variability': (('model', 'window_start_year'), all_mean_variability),
+            'sliding_variability': final_variability_da,
+            'odsl_obs_dynamic': odsl_obs_dynamic,
+            'pcc_variability': (('model', 'window_start_year'), all_pcc_var),
+            'rmse_variability': (('model', 'window_start_year'), all_rmse_var),
+            'odsl_var_obs_centered': odsl_var_obs_centered, 
         },
         coords={
             'model': model_names_for_sliding,
-            'window_start_year': all_windows
+            'window_start_year': all_windows,
+            'latitude': final_trends_da.latitude,
+            'longitude': final_trends_da.longitude
         }
     )
-    output_ds.attrs['description'] = "Sliding window PCC and RMSE results."
+    output_ds.attrs['description'] = "Sliding window mean trend / variability, PCC, RMSE, and trend map results."
 
     return output_ds
 

@@ -22,8 +22,10 @@
 import xarray as xr
 import os
 import glob
-from utils import cache_result, rotate_longitude
-from config import TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS
+import pandas as pd
+
+from utils import (cache_result, rotate_longitude)
+from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS)
 
 def find_folder_by_name(folder_name, start_path=None, max_depth=5):
     """Search for a folder by name, starting from current directory and going up."""
@@ -135,23 +137,9 @@ def load_gia_data():
 
 def get_scenario_files(cmip_version, scenario, base_path, return_models=False):
     """Get all NetCDF files for a specific CMIP scenario."""
+
     #scenario names to folder patterns
-    scenario_folders = {
-        "CMIP5": {
-            "historical": "cmip5_zos_historical",
-            "rcp26": "cmip5_zos_rcp26",
-            "rcp45": "cmip5_zos_rcp45",
-            "rcp85": "cmip5_zos_rcp85"
-        },
-        "CMIP6": {
-            "historical": "cmip6_zos_historical",
-            "ssp126": "cmip6_zos_ssp126",
-            "ssp245": "cmip6_zos_ssp245",
-            "ssp585": "cmip6_zos_ssp585"
-        }
-    }
-    
-    folder = scenario_folders[cmip_version].get(scenario)
+    folder = CMIP_SCENARIOS.get(cmip_version, {}).get(scenario)
     if not folder:
         raise ValueError(f"Unknown scenario {scenario} for {cmip_version}")
     
@@ -184,16 +172,13 @@ def get_cmip_files_inventory(cmip_version="CMIP5"):
     base_path = os.path.join(CMIP_BASE_PATH, cmip_version)
     
     #define scenarios
-    scenarios = {
-        "CMIP5": ["historical", "rcp26", "rcp45", "rcp85"],
-        "CMIP6": ["historical", "ssp126", "ssp245", "ssp585"]
-    }
+    scenarios = CMIP_SCENARIOS.get(cmip_version, {})
     
     #find all available files and unique models
     all_files = {}
     all_models = set()
     
-    for scenario in scenarios[cmip_version]:
+    for scenario in scenarios:
         try:
             files, models = get_scenario_files(cmip_version, scenario, base_path, return_models=True)
             #dictionary for easy lookup: {model_name: filepath}

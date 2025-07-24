@@ -166,12 +166,25 @@ def calculate_weighted_stats(data_x, mask, data_y=None):
         
     return results
 
-#mask for regionwide statistics
 def create_region_mask(data_array, extent):
-    """Create a mask for the North Atlantic region."""
+    """Create a mask for regionwide statistics for the North Atlantic region."""
     lon_min, lon_max, lat_min, lat_max = extent
     mask = ((data_array.longitude >= lon_min) & 
             (data_array.longitude <= lon_max) & 
             (data_array.latitude >= lat_min) & 
             (data_array.latitude <= lat_max))
     return mask
+
+def detrend_timeseries(data_array, degree=1, dim='time'):
+    """Detrending for variability calculation."""
+
+    #check
+    if not isinstance(degree, int) or degree < 0:
+        raise ValueError(f"Degree must be a non-negative integer, but got {degree}.")
+
+    #fit polynomial
+    p = data_array.polyfit(dim=dim, deg=degree)
+    fit = xr.polyval(data_array[dim], p.polyfit_coefficients)
+    
+    #return residuals
+    return data_array - fit
