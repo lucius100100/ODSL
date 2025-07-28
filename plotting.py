@@ -6,6 +6,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
 import pandas as pd
+import xesmf as xe
 
 from utils import calculate_weighted_stats, create_region_mask
 from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG)
@@ -53,7 +54,8 @@ def add_map_features(ax, extent, is_left=False, is_bottom=False):
     ax.add_feature(cfeature.LAND, color='lightgray', zorder=1)
     ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
     
-    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='-')
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+                      linewidth=0.5, color='gray', alpha=0.5, linestyle='-')
     gl.top_labels = False
     gl.right_labels = False
     gl.left_labels = is_left
@@ -70,7 +72,8 @@ def plot_observed_odsl_components(obs_results, fig_dir):
         standard_parallels=PROJECTION_PARAMS['standard_parallels']
     )
     
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(11, 10), subplot_kw={'projection': proj})
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(11, 10), 
+                            subplot_kw={'projection': proj})
     ax1, ax2, ax3, ax4 = axes.flatten()
     
     #data
@@ -114,9 +117,11 @@ def plot_observed_odsl_components(obs_results, fig_dir):
     cbar = fig.colorbar(im1, cax=cbar_ax, orientation='horizontal')
     cbar.set_label('Sea level trend (mm/yr)', fontsize=14)
     
-    plt.suptitle(f'Observed ODSL trend ({common_years.min()}-{common_years.max()})', fontsize=16, fontweight='bold', y=0.98)
+    plt.suptitle(f'Observed ODSL trend ({common_years.min()}-{common_years.max()})',
+                fontsize=16, fontweight='bold', y=0.98)
     
-    plt.savefig(os.path.join(fig_dir, f'ODSL_components_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(fig_dir, f'ODSL_components_{START_YEAR}_{END_YEAR}.png'), 
+                dpi=300, bbox_inches='tight')
     plt.show()
 
 def plot_cmip5_multimodel_mean(cmip_results, fig_dir):
@@ -227,7 +232,8 @@ def plot_observed_vs_modeled(cmip_results, sliding_results, fig_dir):
     mesh3 = difference.plot.pcolormesh(ax=ax3, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-vmax_diff, vmax=vmax_diff, add_colorbar=False)
     ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.2f} {cfg["units"]}, RMS: {stats_difference["std_x"]:.2f} {cfg["units"]}', fontsize=11)
     
-    fig.suptitle(f'Observed vs. modeled ODSL {cfg["name"]} ({START_YEAR}-{END_YEAR})\n' f'North Atlantic PCC = {pcc_w:.2f}', fontsize=16, y=1.02)
+    fig.suptitle(
+        f'Observed vs. modeled ODSL {cfg["name"]} ({START_YEAR}-{END_YEAR})\n' f'North Atlantic PCC = {pcc_w:.2f}', fontsize=16, y=1.02)
     
     cbar_ax = fig.add_axes([0.3, 0.1, 0.4, 0.03])
     cbar = fig.colorbar(mesh1, cax=cbar_ax, orientation='horizontal')
@@ -271,7 +277,8 @@ def plot_sliding_window_timeseries(sliding_results, fig_dir):
     #plot 1: mean trend or variability
     for i, model_name in enumerate(model_names):
         model_ts = mean_ts_data.sel(model=model_name)
-        ax1.plot(window_centers, model_ts, color=colors[i % len(colors)], linestyle=line_styles[i % len(line_styles)], linewidth=line_widths[i % len(line_widths)], alpha=0.8, label=model_name)
+        ax1.plot(window_centers, model_ts, color=colors[i % len(colors)], linestyle=line_styles[i % len(line_styles)], 
+                 linewidth=line_widths[i % len(line_widths)], alpha=0.8, label=model_name)
     ax1.plot(window_centers, mean_ts_ensemble, color='black', linewidth=3.5, linestyle='-', label='Ensemble mean', zorder=10, alpha=0.9)
     ax1.axvline(START_YEAR + 9.5, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Obs period center')
     ax1.axhline(0, color='gray', linestyle='-', alpha=0.3, linewidth=0.5)
@@ -282,7 +289,8 @@ def plot_sliding_window_timeseries(sliding_results, fig_dir):
 
     #plot 2: PCC
     for i, model_name in enumerate(model_names):
-        ax2.plot(window_centers, pcc.sel(model=model_name), color=colors[i % len(colors)], linestyle=line_styles[i % len(line_styles)], linewidth=line_widths[i % len(line_widths)], alpha=0.8, label=model_name)
+        ax2.plot(window_centers, pcc.sel(model=model_name), color=colors[i % len(colors)], linestyle=line_styles[i % len(line_styles)],
+                 linewidth=line_widths[i % len(line_widths)], alpha=0.8, label=model_name)
     ax2.plot(window_centers, pcc_mean, color='black', linewidth=3.5, linestyle='-', label='Ensemble mean', zorder=10, alpha=0.9)
     ax2.axvline(START_YEAR + 9.5, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Obs period center')
     ax2.axhline(0, color='gray', linestyle='-', alpha=0.3, linewidth=0.5)
@@ -292,7 +300,8 @@ def plot_sliding_window_timeseries(sliding_results, fig_dir):
     
     #plot 3: RMSE
     for i, model_name in enumerate(model_names):
-        ax3.plot(window_centers, rmse.sel(model=model_name), color=colors[i % len(colors)], linestyle=line_styles[i % len(line_styles)], linewidth=line_widths[i % len(line_widths)], alpha=0.8, label=model_name)
+        ax3.plot(window_centers, rmse.sel(model=model_name), color=colors[i % len(colors)], linestyle=line_styles[i % len(line_styles)],
+                 linewidth=line_widths[i % len(line_widths)], alpha=0.8, label=model_name)
     ax3.plot(window_centers, rmse_mean, color='black', linewidth=3.5, linestyle='-', label='Ensemble mean', zorder=10, alpha=0.9)
     ax3.axvline(START_YEAR + 9.5, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Obs period center')
     ax3.set_xlabel('Window center year', fontsize=12)

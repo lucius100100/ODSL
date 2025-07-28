@@ -1,11 +1,19 @@
+from pathlib import Path
+
 #parameters
 START_YEAR = 1993               #observed period
 END_YEAR = 2012
-EXTENT = [-65, 40, 50, 80]      #North Atlantic extent
-USE_CACHE = True                #cache settings
-FORCE_RECOMPUTE = False         #force recompute cache
-VARIABILITY_DETREND_DEGREE = 4  #polynomial degree, 1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
-PLOT_VARIABLE = 'variability'   #what to plot: 'trend', 'variability'
+EXTENT = [-65, 40, 50, 80]      #North Atlantic
+
+#cache settings
+USE_CACHE = True
+FORCE_RECOMPUTE = False
+
+#variability calculation method
+VARIABILITY_DETREND_DEGREE = 4  #1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
+
+#what to plot
+PLOT_VARIABLE = 'variability'   #'trend', 'variability'
 
 PLOT_CONFIG = {
     'trend': {

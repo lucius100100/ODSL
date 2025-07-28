@@ -116,7 +116,7 @@ This project is licensed under the MIT License - see below:
 ```text
 MIT License
 
-Copyright (c) 2025 Luc van Dijk
+Copyright (c) 2024 Luc van Dijk
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -142,7 +142,7 @@ SOFTWARE.
 If you use this code in your research, please cite:
 
 ```bibtex
-@software{odsl_analysis_2025,
+@software{odsl_analysis_2024,
   author = {Luc van Dijk},
   title = {Ocean Dynamic Sea Level (ODSL) Analysis},
   year = {2025},
