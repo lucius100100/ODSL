@@ -6,7 +6,6 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
 import pandas as pd
-import xesmf as xe
 
 from utils import calculate_weighted_stats, create_region_mask
 from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG)

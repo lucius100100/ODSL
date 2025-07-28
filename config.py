@@ -1,19 +1,11 @@
-from pathlib import Path
-
 #parameters
 START_YEAR = 1993               #observed period
 END_YEAR = 2012
 EXTENT = [-65, 40, 50, 80]      #North Atlantic
-
-#cache settings
-USE_CACHE = True
+USE_CACHE = True                #cache settings
 FORCE_RECOMPUTE = False
-
-#variability calculation method
-VARIABILITY_DETREND_DEGREE = 4  #1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
-
-#what to plot
-PLOT_VARIABLE = 'variability'   #'trend', 'variability'
+VARIABILITY_DETREND_DEGREE = 4  #variability polynomial degree: 1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
+PLOT_VARIABLE = 'variability'   #what to plot: 'trend', 'variability'
 
 PLOT_CONFIG = {
     'trend': {
@@ -50,7 +42,6 @@ CMIP_SCENARIOS = {
         "ssp585": "cmip6_zos_ssp585"
     }
 }
-
 
 #target models from supplementary material table 1 Richter et al. 2017
 TARGET_CMIP5_MODELS = [

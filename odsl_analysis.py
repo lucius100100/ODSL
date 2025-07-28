@@ -1,20 +1,15 @@
 import numpy as np
 import xarray as xr
 import xesmf as xe
-import matplotlib.pyplot as plt
-import matplotlib.path as mpath
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
-from matplotlib.backends.backend_pdf import PdfPages
 import os
 import pandas as pd
 import traceback
 from scipy import stats
 
-from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, load_multiple_cmip_models, get_cmip_files_inventory, find_folder_by_name)
-from utils import (cache_result, calculate_weighted_stats, create_region_mask, rotate_longitude, detrend_timeseries)
+from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name)
+from utils import (cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries)
 from plotting import create_all_figures 
-from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, TARGET_CMIP5_MODELS, CMIP_SCENARIOS, VARIABILITY_DETREND_DEGREE)
+from config import (START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, VARIABILITY_DETREND_DEGREE)
 
 #figures directory
 fig_dir = './figures/'
