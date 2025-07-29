@@ -19,12 +19,12 @@
 # https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py
 #----------------------------------------------------------------------------------------#
 
+from utils import (cache_result, rotate_longitude)
+from config import (TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS)
+
 import xarray as xr
 import os
 import glob
-
-from utils import (cache_result, rotate_longitude)
-from config import (TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS)
 
 def find_folder_by_name(folder_name, start_path=None, max_depth=5):
     """Search for a folder by name, starting from current directory and going up."""

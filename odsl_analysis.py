@@ -1,15 +1,17 @@
+from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name)
+from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries)
+from plotting import create_all_figures 
+from config import (START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, VARIABILITY_DETREND_DEGREE)
+
+setup_esmf_environment()
+
+import os
 import numpy as np
 import xarray as xr
 import xesmf as xe
-import os
 import pandas as pd
 import traceback
 from scipy import stats
-
-from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name)
-from utils import (cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries)
-from plotting import create_all_figures 
-from config import (START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, VARIABILITY_DETREND_DEGREE)
 
 #figures directory
 fig_dir = './figures/'

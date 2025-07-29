@@ -6,6 +6,36 @@ import numpy as np
 from pathlib import Path
 from functools import wraps
 import config
+import os
+import sys
+
+def setup_esmf_environment():
+    """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported.See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
+    if 'ESMFMKFILE' not in os.environ:
+        #active environment root path
+        env_path = Path(sys.prefix)
+
+        #potential locations for esmf.mk
+        possible_paths = [
+            env_path / "lib" / "esmf.mk",            #Linux/macOS
+            env_path / "Lib" / "esmf.mk",            #Windows
+            env_path / "Library" / "lib" / "esmf.mk" #Windows
+        ]
+
+        #search for file
+        found_path = None
+        for path in possible_paths:
+            if path.exists():
+                found_path = path
+                break
+        
+        #set environment variable
+        if found_path:
+            os.environ['ESMFMKFILE'] = str(found_path)
+        else:
+            raise ImportError(
+                "Could not find 'esmf.mk' in the environment.\n" "The xesmf package installation may be incomplete or corrupted.\n" "Please try reinstalling it with: `conda install -c conda-forge xesmf`."
+            )
 
 #cache directory
 CACHE_DIR = Path('./cache')

@@ -1,3 +1,6 @@
+from utils import calculate_weighted_stats, create_region_mask
+from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG)
+
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -6,9 +9,6 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
 import pandas as pd
-
-from utils import calculate_weighted_stats, create_region_mask
-from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG)
 
 def create_all_figures(obs_results, cmip_results, sliding_results, fig_dir):
     """Generate all figures for the analysis."""
