@@ -10,7 +10,8 @@ import os
 import sys
 
 def setup_esmf_environment():
-    """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported.See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
+    """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported. See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
+    
     if 'ESMFMKFILE' not in os.environ:
         #active environment root path
         env_path = Path(sys.prefix)
@@ -41,11 +42,18 @@ def setup_esmf_environment():
 CACHE_DIR = Path('./cache')
 CACHE_DIR.mkdir(exist_ok=True)
 
-def cache_result(cache_name):
-    """Cache function, prioritize netcdf and csv, pickle only if necessary."""
+def cache_result(cache_key_prefix):
+    """Cache function, prioritize netcdf, csv, and json, pickle only if necessary."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+
+            #dynamic cache name
+            arg_str = "_".join(map(str, args))
+            kwarg_str = "_".join(f"{k}_{v}" for k, v in sorted(kwargs.items()))
+            dynamic_part = "_".join(filter(None, [arg_str, kwarg_str]))
+            cache_name = f"{cache_key_prefix}_{dynamic_part}" if dynamic_part else cache_key_prefix
+
             #cache paths
             nc_path = CACHE_DIR / f"{cache_name}.nc"
             csv_path = CACHE_DIR / f"{cache_name}.csv"

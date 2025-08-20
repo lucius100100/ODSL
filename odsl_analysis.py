@@ -1,7 +1,7 @@
 from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name)
 from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries)
 from plotting import create_all_figures 
-from config import (START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, VARIABILITY_DETREND_DEGREE)
+from config import (START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO)
 
 setup_esmf_environment()
 
@@ -21,11 +21,11 @@ if not os.path.exists(fig_dir):
 @cache_result('observed_odsl')
 def calculate_observed_odsl():
     """Calculate observed ODSL from components."""
-    print("\n=== Calculating Observed ODSL ===")
+    print("\nCalculating observed ODSL...")
     
     #load data
     duacs_yearly = load_altimetry_data()
-    asl_frederikse = load_budget_data()
+    asl_frederikse = load_budget_data(extend_to_year=END_YEAR if END_YEAR > 2018 else None)
     gia_data = load_gia_data()
     gia_rad_da = gia_data['gia_rad']
     gia_sea_da = gia_data['gia_sea']
@@ -96,7 +96,7 @@ def calculate_observed_odsl():
 @cache_result('cmip5_processed_models')
 def process_cmip5_models():
     """Process CMIP5 models and return a single dataset."""
-    print("\n=== Processing CMIP5 Models ===")
+    print("\nProcessing CMIP5 models...")
     
     inventory = get_cmip_files_inventory("CMIP5")
     all_files = inventory['all_files']
@@ -118,7 +118,7 @@ def process_cmip5_models():
             
             try:
                 #calculations per model
-                combined_zos = load_cmip_model_data(model_name, future_scenario='rcp45')
+                combined_zos = load_cmip_model_data(model_name, future_scenario=CMIP5_FUTURE_SCENARIO, cmip_version="CMIP5")
                 region_mask = create_region_mask(combined_zos.isel(time=0), EXTENT)
                 
                 period_data = combined_zos.sel(time=slice(START_YEAR, END_YEAR))
@@ -182,7 +182,7 @@ def process_cmip5_models():
 @cache_result('sliding_window_results')
 def perform_sliding_window_analysis():
     """Sliding window analysis on all models."""
-    print("\n=== Sliding Window Analysis ===")
+    print("\nSliding window analysis...")
     
     #processed models
     cmip_results_ds = process_cmip5_models() 
@@ -333,7 +333,7 @@ def perform_sliding_window_analysis():
 @cache_result('steric_comparison')
 def compare_with_steric_record():
     """Compare global mean removed ODSL with steric record."""
-    print("\n=== Comparing with Steric Record ===")
+    print("\nComparing with steric record...")
     
     #observed ODSL
     obs_results = calculate_observed_odsl()
@@ -386,14 +386,14 @@ def compare_with_steric_record():
         print("-"*60)
         
         print("\nGLOBAL TRENDS:")
-        print(f"  Global mean ODSL:           {global_mean_odsl:6.3f} mm/yr")
-        print(f"  Global steric (Frederikse):  {steric_trend_mm_yr:6.3f} mm/yr")
-        print(f"  Difference:                 {global_mean_odsl - steric_trend_mm_yr:6.3f} mm/yr")
+        print(f"Global mean ODSL:           {global_mean_odsl:6.3f} mm/yr")
+        print(f"Global steric (Frederikse):  {steric_trend_mm_yr:6.3f} mm/yr")
+        print(f"Difference:                 {global_mean_odsl - steric_trend_mm_yr:6.3f} mm/yr")
         
         print("\nREGIONAL NORTH ATLANTIC TRENDS:")
-        print(f"  Original ODSL:              {regional_stats_original['mean_x']:6.3f} mm/yr")
-        print(f"  ODSL (global mean removed):  {regional_stats_detrended['mean_x']:6.3f} mm/yr")
-        print(f"  Change after detrending:     {regional_stats_detrended['mean_x'] - regional_stats_original['mean_x']:6.3f} mm/yr")
+        print(f"Original ODSL:              {regional_stats_original['mean_x']:6.3f} mm/yr")
+        print(f"ODSL (global mean removed):  {regional_stats_detrended['mean_x']:6.3f} mm/yr")
+        print(f"Change after detrending:     {regional_stats_detrended['mean_x'] - regional_stats_original['mean_x']:6.3f} mm/yr")
         
         print("\nYEAR-BY-YEAR STERIC DATA:")
         print("-"*40)
@@ -438,9 +438,84 @@ def compare_with_steric_record():
         'odsl_detrended': odsl_global_mean_removed
     }
 
+@cache_result('cmip_scenario_timeseries_results')
+def process_cmip_scenario_data():
+    """Process CMIP5/6 data to get ensemble timeseries for each scenario."""
+    print("\nProcessing CMIP scenario ensembles")
+    
+    final_results = []
+    
+    #loop over cmip version scenarios
+    for cmip_version, target_models in [("CMIP5", TARGET_CMIP5_MODELS), ("CMIP6", TARGET_CMIP6_MODELS)]:
+        print(f"\nProcessing {cmip_version} scenarios")
+        
+        scenarios_to_process = list(CMIP_SCENARIOS[cmip_version].keys())
+        historical_end_year = 2005 if cmip_version == "CMIP5" else 2014
+        
+        scenario_datasets = {}
+        
+        for scenario in scenarios_to_process:
+            print(f"Processing scenario: {scenario}")
+            
+            model_timeseries_list = []
+            
+            #loop over each model
+            for model_name in target_models:
+                try:
+                    end_year = historical_end_year if scenario == "historical" else 2100
+                    future_scen = None if scenario == "historical" else scenario
+                    
+                    ts = load_cmip_model_data(model_name, hist_scenario='historical', future_scenario=future_scen, cmip_version=cmip_version, end_year=end_year)
+                    if ts is None: continue
+                    
+                    region_mask = create_region_mask(ts.isel(time=0), EXTENT)
+                    regional_ts = ts.where(region_mask).mean(dim=['latitude', 'longitude'])
+                    regional_ts_mm = regional_ts * 10
+                    regional_ts_mm = regional_ts_mm.rename({'time': 'year'})
+                    model_timeseries_list.append(regional_ts_mm)
+
+                except Exception as e:
+                    print(f"Could not process model {model_name} for scenario {scenario}: {e}")
+
+            #concatenate results
+            if model_timeseries_list:
+                ensemble_ts = xr.concat(model_timeseries_list, dim=pd.Index([f"model_{i}" for i in range(len(model_timeseries_list))], name='model'))
+                ensemble_mean = ensemble_ts.mean(dim='model', skipna=True)
+                ensemble_std = ensemble_ts.std(dim='model', skipna=True)
+
+                scenario_datasets[scenario] = xr.Dataset({
+                    'ensemble_mean': ensemble_mean,
+                    'ensemble_std': ensemble_std,
+                    'n_models': len(model_timeseries_list)
+                })
+                print(f"  Processed {len(model_timeseries_list)} models for {scenario}")
+
+        if scenario_datasets:
+            all_years = sorted({year for ds in scenario_datasets.values() for year in ds.year.values})
+            
+            ds_list = []
+            for scenario_name, ds in scenario_datasets.items():
+                ds = ds.reindex(year=all_years)
+                ds_list.append(ds)
+
+            combined_ds = xr.concat(ds_list, dim=pd.Index(list(scenario_datasets.keys()), name='scenario'))
+            combined_ds.attrs['description'] = f"Ensemble timeseries for {cmip_version} scenarios"
+            combined_ds.attrs['historical_end_year'] = historical_end_year
+            combined_ds.attrs['valid_scenarios'] = list(scenario_datasets.keys())
+            final_results.append(combined_ds)
+
+    if not final_results:
+        return xr.Dataset()
+
+    cmip_coord = pd.Index(["CMIP5", "CMIP6"], name='cmip_version')
+    combined_results = xr.concat(final_results, dim=cmip_coord)
+    
+    print(f"Successfully processed timeseries for {len(final_results)} CMIP versions")
+    return combined_results
+
 def main():
     """Run complete analysis."""
-    print("=== ODSL Analysis ===")
+    print("ODSL analysis...")
     fig_dir = './figures/'
 
     #observed ODSL
@@ -457,11 +532,14 @@ def main():
     #sliding window analysis
     sliding_results = perform_sliding_window_analysis()
     print("Completed sliding window analysis")
-    
-    print("\n=== All calculations complete. Generating figures... ===")
+
+    scenario_results = process_cmip_scenario_data()
+    print("Completed scenario data processing")
+
+    print("\nAll calculations complete. Generating figures...")
 
     #figures
-    create_all_figures(obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, fig_dir=fig_dir)
+    create_all_figures(obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, fig_dir=fig_dir)
     print("All figures generated!")
 
 if __name__ == "__main__":

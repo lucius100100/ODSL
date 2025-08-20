@@ -20,7 +20,7 @@
 #----------------------------------------------------------------------------------------#
 
 from utils import (cache_result, rotate_longitude)
-from config import (TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS)
+from config import (TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO)
 
 import xarray as xr
 import os
@@ -64,7 +64,7 @@ def load_altimetry_data():
     return duacs_yearly
 
 @cache_result('budget_data')
-def load_budget_data():
+def load_budget_data(extend_to_year=None):
     """Load Frederikse budget data."""
     try:
         budget_parent = find_folder_by_name("Budget")
@@ -84,6 +84,29 @@ def load_budget_data():
     #rotate and standardize coordinates
     asl_frederikse = rotate_longitude(asl_frederikse, 'lon')
     asl_frederikse = asl_frederikse.rename({'lon': 'longitude', 'lat': 'latitude', 'time': 'year'})
+
+    if extend_to_year and asl_frederikse.year.max() < extend_to_year:
+        print(f"Extending budget data to year {extend_to_year}...")
+        last_year = asl_frederikse.year.max().item()
+        
+        #last 10 years for trend calculation
+        trend_period = asl_frederikse.sel(year=slice(last_year-9, last_year))
+        
+        #trend for each grid cell
+        slope = trend_period.polyfit(dim='year', deg=1, skipna=True).polyfit_coefficients.sel(degree=1)
+        
+        last_data = asl_frederikse.sel(year=last_year)
+        
+        years_to_add = range(last_year + 1, extend_to_year + 1)
+        extended_data_list = []
+        for year_to_add in years_to_add:
+            years_diff = year_to_add - last_year
+            extrapolated_slice = last_data + (slope * years_diff)
+            extrapolated_slice = extrapolated_slice.assign_coords(year=year_to_add)
+            extended_data_list.append(extrapolated_slice)
+            
+        extended_data = xr.concat(extended_data_list, dim='year')
+        asl_frederikse = xr.concat([asl_frederikse, extended_data], dim='year')
 
     print(f"Geocentric sea level range: {asl_frederikse.min().item():.2f} to {asl_frederikse.max().item():.2f} cm/yr")
 
@@ -137,26 +160,32 @@ def load_gia_data():
 def get_scenario_files(cmip_version, scenario, base_path, return_models=False):
     """Get all NetCDF files for a specific CMIP scenario."""
 
-    #scenario names to folder patterns
     folder = CMIP_SCENARIOS.get(cmip_version, {}).get(scenario)
     if not folder:
         raise ValueError(f"Unknown scenario {scenario} for {cmip_version}")
     
-    #find all .nc files in the folder
     pattern = os.path.join(base_path, folder, "*.nc")
     files = glob.glob(pattern)
     
     if return_models:
-        #model names from filenames
         models = []
         for f in files:
-            basename = os.path.basename(f)
+            basename = os.path.basename(f).replace('.nc', '')
             #remove prefix and suffix to get model name
             #e.g., "cmip6_zos_historical_ACCESS-CM2_1850_2014.nc" -> "ACCESS-CM2"
-            parts = basename.replace('.nc', '').split('_')
-            model_parts = parts[3:-2] if len(parts) > 5 else parts[3:-1]
-            model_name = '_'.join(model_parts)
-            models.append(model_name)
+            try:
+                core_name = basename.rsplit('_', 2)[0]
+                prefix = f"{cmip_version.lower()}_zos_{scenario}_"
+
+                if core_name.startswith(prefix):
+                    model_name = core_name.removeprefix(prefix)
+                    models.append(model_name)
+                else:
+                    print(f"Warning: Filename '{basename}' did not match expected prefix '{prefix}'. Skipping.")
+
+            except IndexError:
+                print(f"Warning: Could not parse model name from filename '{basename}'. Skipping.")
+
         return files, models
     
     return files
@@ -183,9 +212,9 @@ def get_cmip_files_inventory(cmip_version="CMIP5"):
             #dictionary for easy lookup: {model_name: filepath}
             all_files[scenario] = {model: file for model, file in zip(models, files)}
             all_models.update(models)
-            print(f"  Found {len(files)} files for {scenario}")
+            print(f"Found {len(files)} files for {scenario}")
         except Exception as e:
-            print(f"  Warning: Could not load {scenario}: {e}")
+            print(f"Warning: Could not load {scenario}: {e}")
             all_files[scenario] = {}
     
     return {
@@ -194,10 +223,8 @@ def get_cmip_files_inventory(cmip_version="CMIP5"):
         'base_path': base_path
     }
 
-#@cache_result('cmip_model_data')
-def load_cmip_model_data(model_name, hist_scenario='historical', future_scenario='rcp45', 
-                        cmip_version="CMIP5", start_year=None, end_year=None):
-    """Load and process a single CMIP model combining historical and future scenarios."""
+def load_cmip_model_data(model_name, hist_scenario='historical', future_scenario=None, cmip_version="CMIP5", start_year=None, end_year=None):
+    """Load and process a single CMIP model, optionally combining historical and future scenarios."""
     
     #files inventory
     inventory = get_cmip_files_inventory(cmip_version)
@@ -205,66 +232,34 @@ def load_cmip_model_data(model_name, hist_scenario='historical', future_scenario
     
     #model check
     hist_file = all_files.get(hist_scenario, {}).get(model_name)
-    future_file = all_files.get(future_scenario, {}).get(model_name)
     
-    if not hist_file or not future_file:
-        raise FileNotFoundError(f"Model {model_name} not found for {hist_scenario} and/or {future_scenario}")
+    future_file = None
+    if future_scenario:
+        future_file = all_files.get(future_scenario, {}).get(model_name)
     
-    print(f"Loading {model_name} ({cmip_version} {hist_scenario} + {future_scenario})...")
+    if not hist_file:
+        raise FileNotFoundError(f"Model {model_name} not found for {hist_scenario}")
+    
+    if future_scenario and not future_file:
+         raise FileNotFoundError(f"Model {model_name} not found for future scenario {future_scenario}")
+    
+    print(f"Loading {model_name} ({cmip_version} {hist_scenario}" + (f" + {future_scenario}" if future_file else "").strip() + ")...")
     
     #load datasets
-    with xr.open_dataset(hist_file) as ds_hist, xr.open_dataset(future_file) as ds_future:
-        #squeeze and rename
+    with xr.open_dataset(hist_file) as ds_hist:
         zos_hist = ds_hist['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
-        zos_future = ds_future['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
         
-        #combine historical and future
-        combined_zos = xr.concat([zos_hist, zos_future], dim='time')
+        if future_file:
+            with xr.open_dataset(future_file) as ds_future:
+                zos_future = ds_future['CorrectedReggrided_zos'].squeeze('model', drop=True).rename({'lon': 'longitude', 'lat': 'latitude'})
+                #combine historical and future
+                combined_zos = xr.concat([zos_hist, zos_future], dim='time')
+        else:
+            combined_zos = zos_hist
         
         #subset time period
-        if start_year and end_year:
-            combined_zos = combined_zos.sel(time=slice(start_year, end_year))
+        if start_year or end_year:
+            time_slice = slice(start_year, end_year)
+            combined_zos = combined_zos.sel(time=time_slice)
         
         return combined_zos
-    
-def load_multiple_cmip_models(model_list=None, hist_scenario='historical', future_scenario='rcp45', cmip_version="CMIP5"):
-    """Load multiple CMIP models."""
-    
-    #target models if no list provided
-    if model_list is None:
-        if cmip_version == "CMIP5":
-            model_list = TARGET_CMIP5_MODELS
-        else:
-            model_list = TARGET_CMIP6_MODELS
-    
-    #inventory to check available models
-    inventory = get_cmip_files_inventory(cmip_version)
-    available_models = inventory['all_models']
-    
-    #load model
-    loaded_models = {}
-    failed_models = []
-    
-    for model_name in model_list:
-        if model_name not in available_models:
-            print(f"Warning: {model_name} not available in {cmip_version}")
-            failed_models.append(model_name)
-            continue
-            
-        try:
-            model_data = load_cmip_model_data(
-                model_name, 
-                hist_scenario=hist_scenario,
-                future_scenario=future_scenario,
-                cmip_version=cmip_version
-            )
-            loaded_models[model_name] = model_data
-        except Exception as e:
-            print(f"Error loading {model_name}: {e}")
-            failed_models.append(model_name)
-    
-    print(f"\nSuccessfully loaded {len(loaded_models)} models")
-    if failed_models:
-        print(f"Failed to load: {', '.join(failed_models)}")
-    
-    return loaded_models

@@ -9,8 +9,10 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import os
 import pandas as pd
+import xesmf as xe
+import matplotlib.patches as mpatches
 
-def create_all_figures(obs_results, cmip_results, sliding_results, fig_dir):
+def create_all_figures(obs_results, cmip_results, sliding_results, scenario_results, fig_dir):
     """Generate all figures for the analysis."""
     if not os.path.exists(fig_dir):
         os.makedirs(fig_dir)
@@ -19,8 +21,10 @@ def create_all_figures(obs_results, cmip_results, sliding_results, fig_dir):
     if not os.path.exists(variable_fig_dir):
         os.makedirs(variable_fig_dir)
         
-    print(f"\n--- Generating figures for {PLOT_VARIABLE.upper()} ---")
-    print(f"--- Figures will be saved in: {variable_fig_dir} ---")
+    plot_scenario_comparison(scenario_results, fig_dir)
+
+    print(f"\nGenerating figures for {PLOT_VARIABLE.upper()}")
+    print(f"Figures will be saved in: {variable_fig_dir}")
 
     if PLOT_VARIABLE == 'trend':
         plot_observed_odsl_components(obs_results, variable_fig_dir)
@@ -116,11 +120,9 @@ def plot_observed_odsl_components(obs_results, fig_dir):
     cbar = fig.colorbar(im1, cax=cbar_ax, orientation='horizontal')
     cbar.set_label('Sea level trend (mm/yr)', fontsize=14)
     
-    plt.suptitle(f'Observed ODSL trend ({common_years.min()}-{common_years.max()})',
-                fontsize=16, fontweight='bold', y=0.98)
+    plt.suptitle(f'Observed ODSL trend ({common_years.min()}-{common_years.max()})', fontsize=16, fontweight='bold', y=0.98)
     
-    plt.savefig(os.path.join(fig_dir, f'ODSL_components_{START_YEAR}_{END_YEAR}.png'), 
-                dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(fig_dir, f'ODSL_components_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
 def plot_cmip5_multimodel_mean(cmip_results, fig_dir):
@@ -168,11 +170,7 @@ def plot_cmip5_multimodel_mean(cmip_results, fig_dir):
     stats_model = calculate_weighted_stats(data_to_plot, region_mask)
     
     ax.set_title(
-        f'CMIP5 multi-model mean ({valid_models_count} models (historical + RCP4.5))\n'
-        f'ODSL trend ({START_YEAR}-{END_YEAR}) Mean: {stats_model["mean_x"]:.2f} mm/yr, '
-        f'RMS: {stats_model["std_x"]:.2f} {cfg["units"]}',
-        fontsize=12, pad=15
-    )
+        f'CMIP5 multi-model mean ({valid_models_count} models (historical + RCP4.5))\n' f'ODSL trend ({START_YEAR}-{END_YEAR}) Mean: {stats_model["mean_x"]:.2f} mm/yr,' f'RMS: {stats_model["std_x"]:.2f} {cfg["units"]}',fontsize=12, pad=15, fontweight='bold')
     
     plt.savefig(os.path.join(fig_dir, f'CMIP5_multimodel_mean_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
     plt.show()
@@ -231,8 +229,7 @@ def plot_observed_vs_modeled(cmip_results, sliding_results, fig_dir):
     mesh3 = difference.plot.pcolormesh(ax=ax3, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-vmax_diff, vmax=vmax_diff, add_colorbar=False)
     ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.2f} {cfg["units"]}, RMS: {stats_difference["std_x"]:.2f} {cfg["units"]}', fontsize=11)
     
-    fig.suptitle(
-        f'Observed vs. modeled ODSL {cfg["name"]} ({START_YEAR}-{END_YEAR})\n' f'North Atlantic PCC = {pcc_w:.2f}', fontsize=16, y=1.02)
+    fig.suptitle(f'Observed vs. modeled ODSL {cfg["name"]} ({START_YEAR}-{END_YEAR})\n' f'North Atlantic PCC = {pcc_w:.2f}', fontsize=16, y=1.02, fontweight='bold')
     
     cbar_ax = fig.add_axes([0.3, 0.1, 0.4, 0.03])
     cbar = fig.colorbar(mesh1, cax=cbar_ax, orientation='horizontal')
@@ -282,7 +279,7 @@ def plot_sliding_window_timeseries(sliding_results, fig_dir):
     ax1.axvline(START_YEAR + 9.5, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Obs period center')
     ax1.axhline(0, color='gray', linestyle='-', alpha=0.3, linewidth=0.5)
     ax1.set_ylabel(y_label_top, fontsize=12)
-    ax1.set_title(f'Model-observation comparison ({cfg["name"]})\n20-year sliding windows (1900-2012)', fontsize=14, fontweight='bold')
+    ax1.set_title(f'Model-observation comparison ({cfg["name"]})\n20-year sliding windows (1900-{END_YEAR})', fontsize=14, fontweight='bold')
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim(mean_ts_data.min() * 1.1, mean_ts_data.max() * 1.1)
 
@@ -559,7 +556,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     ax.set_xticks(x)
     ax.set_xticklabels([])
     ax.set_xlabel('Models')
-    ax.set_title(f'Model-observation ODSL comparison ({cfg["name"]})\nMean statistics over all 20-yr sliding windows', fontsize=14, pad=20)
+    ax.set_title(f'Model-observation ODSL comparison ({cfg["name"]})\nMean statistics over all 20-yr sliding windows', fontsize=14, pad=20, fontweight='bold')
 
     for i, model_name in enumerate(model_names):
         ax.text(i, 0.02, model_name.replace('\n', ' '), rotation=90, ha='center', va='bottom', fontsize=10)
@@ -570,43 +567,6 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     ax.legend(loc='center right', fontsize=10)
     plt.tight_layout()
     plt.savefig(os.path.join(fig_dir, f'model_comparison_summary_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
-    plt.show()
-
-def plot_observed_variability(obs_results, fig_dir):
-    """Plot the observed ODSL variability."""
-    print("Plotting observed ODSL variability...")
-    
-    cfg = PLOT_CONFIG[PLOT_VARIABLE]
-    
-    proj = ccrs.AlbersEqualArea(
-        central_longitude=PROJECTION_PARAMS['central_longitude'],
-        central_latitude=PROJECTION_PARAMS['central_latitude'],
-        standard_parallels=PROJECTION_PARAMS['standard_parallels']
-    )
-    
-    fig, ax = plt.subplots(figsize=(9, 8), subplot_kw={'projection': proj})
-    add_map_features(ax, EXTENT, is_left=True, is_bottom=True)
-    
-    variability = obs_results['variability']
-    common_years = np.array(obs_results.attrs['common_years_list'])
-
-    mesh = variability.plot.pcolormesh(
-        ax=ax, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], add_colorbar=False
-    )
-    
-    cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
-    cbar.set_label(f'ODSL {cfg["name"]} ({cfg["units"]})', fontsize=10)
-    
-    region_mask = create_region_mask(variability, EXTENT)
-    stats_obs = calculate_weighted_stats(variability, region_mask)
-    
-    ax.set_title(
-        f'Observed ODSL {cfg["name"]} ({common_years.min()}-{common_years.max()})\n'
-        f'Mean: {stats_obs["mean_x"]:.2f} {cfg["units"]}, RMS: {stats_obs["std_x"]:.2f} {cfg["units"]}',
-        fontsize=12, pad=15
-    )
-    
-    plt.savefig(os.path.join(fig_dir, f'Observed_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
 def plot_observed_variability(obs_results, fig_dir):
@@ -644,10 +604,115 @@ def plot_observed_variability(obs_results, fig_dir):
     stats_obs = calculate_weighted_stats(variability, region_mask)
     
     #title
-    ax.set_title(
-        f'Observed ODSL {cfg["name"]} ({common_years.min()}-{common_years.max()})\n'
-        f'Mean: {stats_obs["mean_x"]:.2f} {cfg["units"]}, RMS: {stats_obs["std_x"]:.2f} {cfg["units"]}', fontsize=12, pad=15)
+    ax.set_title(f'Observed ODSL {cfg["name"]} ({common_years.min()}-{common_years.max()})\n' f'Mean: {stats_obs["mean_x"]:.2f} {cfg["units"]}, RMS: {stats_obs["std_x"]:.2f} {cfg["units"]}', fontsize=12, pad=15, fontweight='bold')
     
     #save figure
     plt.savefig(os.path.join(fig_dir, f'Observed_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
+    plt.show()
+
+def plot_scenario_comparison(scenario_results, fig_dir):
+    """Plot timeseries comparison of CMIP5 and CMIP6 ensemble scenarios."""
+    print("Plotting CMIP scenario timeseries comparison...")
+
+    if not scenario_results or "cmip_version" not in scenario_results.coords:
+        print("No valid scenario results to plot.")
+        return
+
+    #plotting
+    fig, axes = plt.subplots(2, 2, figsize=(22, 14), sharex=True)
+    gs = axes[0, 0].get_gridspec()
+    gs.update(hspace=0.3, wspace=0.12)
+    ax_trend_cmip5, ax_trend_cmip6 = axes[0, 0], axes[0, 1]
+    ax_var_cmip5, ax_var_cmip6 = axes[1, 0], axes[1, 1]
+
+    axes_map = {"CMIP5": {"trend": ax_trend_cmip5, "var": ax_var_cmip5}, "CMIP6": {"trend": ax_trend_cmip6, "var": ax_var_cmip6}}
+
+    #scenario colors and labels
+    scenario_colors = {'historical': 'black', 'rcp26': '#377eb8', 'ssp126': '#377eb8', 'rcp45': '#4daf4a', 'ssp245': '#4daf4a', 'rcp85': '#e41a1c', 'ssp585': '#e41a1c'}     
+    scenario_labels = {'rcp26': 'RCP2.6 ± 1 std. dev.', 'ssp126': 'SSP1-2.6 ± 1 std. dev.', 'rcp45': 'RCP4.5 ± 1 std. dev.', 'ssp245': 'SSP2-4.5 ± 1 std. dev.', 'rcp85': 'RCP8.5 ± 1 std. dev.', 'ssp585': 'SSP5-8.5 ± 1 std. dev.', 'historical': 'Historical ± 1 std. dev.'}
+
+    cmip5_data = scenario_results.sel(cmip_version="CMIP5")
+    cmip6_data = scenario_results.sel(cmip_version="CMIP6")
+    
+    #y-axis limits
+    trend_min = min(((cmip5_data.ensemble_mean - cmip5_data.ensemble_std) / 10).min(), ((cmip6_data.ensemble_mean - cmip6_data.ensemble_std) / 10).min())
+    trend_max = max(((cmip5_data.ensemble_mean + cmip5_data.ensemble_std) / 10).max(), ((cmip6_data.ensemble_mean + cmip6_data.ensemble_std) / 10).max())
+    var_min = 0
+    var_max = max((cmip5_data.ensemble_std / 10).max(), (cmip6_data.ensemble_std / 10).max())
+
+    for cmip_version, data in [("CMIP5", cmip5_data), ("CMIP6", cmip6_data)]:
+
+        start_year = data.year.min().item()
+        end_year = data.year.max().item()
+
+        ax_trend = axes_map[cmip_version]["trend"]
+        ax_var = axes_map[cmip_version]["var"]
+        
+        historical_end_year = 2005 if cmip_version == "CMIP5" else 2014
+
+        hist_data = data.sel(scenario='historical', year=slice(None, historical_end_year)).dropna(dim='year')
+        
+        ax_trend.plot(hist_data.year, hist_data.ensemble_mean / 10, color='black', linewidth=2.5, label='Historical ± 1 std. dev.', zorder=10)
+        ax_trend.fill_between(hist_data.year, (hist_data.ensemble_mean - hist_data.ensemble_std) / 10, (hist_data.ensemble_mean + hist_data.ensemble_std) / 10, color='black', alpha=0.2, zorder=5)
+        ax_var.plot(hist_data.year, hist_data.ensemble_std / 10, color='black', linewidth=2.5, label='Historical ± 1 std. dev.', zorder=10)
+        ax_var.fill_between(hist_data.year, 0, hist_data.ensemble_std / 10, color='black', alpha=0.1, zorder=4)
+
+        for scenario in data.scenario.values:
+            if scenario == 'historical':
+                continue
+            
+            future_data = data.sel(scenario=scenario, year=slice(historical_end_year + 1, None)).dropna(dim='year')
+            
+            if future_data.year.size > 0:
+                color = scenario_colors.get(scenario, 'grey')
+                label = scenario_labels.get(scenario, scenario.upper())
+
+                #last point of historical data
+                last_historical_point = hist_data.isel(year=-1)
+                
+                #prepend to the future data
+                connected_data = xr.concat([last_historical_point, future_data], dim='year')
+                
+                #connected data for plotting
+                ax_trend.plot(connected_data.year, connected_data.ensemble_mean / 10, color=color, linewidth=2, label=label, alpha=0.8)
+                ax_trend.fill_between(connected_data.year, (connected_data.ensemble_mean - connected_data.ensemble_std) / 10, (connected_data.ensemble_mean + connected_data.ensemble_std) / 10, color=color, alpha=0.15)
+                ax_var.plot(connected_data.year, connected_data.ensemble_std / 10, color=color, linewidth=2, label=label, alpha=0.8)
+                ax_var.fill_between(connected_data.year, 0, connected_data.ensemble_std / 10, color=color, alpha=0.1)
+
+        #formatting
+        ax_trend.set_title(f'{cmip_version} regional mean sea level', fontsize=14)
+        ax_var.set_title(f'{cmip_version} ensemble variability', fontsize=14)
+        
+        for ax in [ax_trend, ax_var]:
+            ax.grid(True, alpha=0.3)
+            ax.set_xlim(start_year, end_year)
+
+        #legend
+        handles, labels = ax_trend.get_legend_handles_labels()
+        observed_patch = mpatches.Patch(color='red', alpha=0.2, label='Observed period')
+        handles.append(observed_patch)
+        ax_trend.legend(handles=handles, loc='upper left')
+
+    for ax in axes.flat:
+        ax.axvline(START_YEAR, color='red', linestyle='--', alpha=0.4, linewidth=1.5)
+        ax.axvline(END_YEAR, color='red', linestyle='--', alpha=0.4, linewidth=1.5)
+        ax.axvspan(START_YEAR, END_YEAR, color='red', alpha=0.2, zorder=0)
+
+    #labels and limits
+    ax_trend_cmip5.set_ylabel('Sea level anomaly (cm)', fontsize=12)
+    ax_var_cmip5.set_ylabel('Variability (cm)', fontsize=12)
+    ax_var_cmip5.set_xlabel('Year', fontsize=12)
+    ax_var_cmip6.set_xlabel('Year', fontsize=12)
+    
+    #y-axis limits
+    ax_trend_cmip5.set_ylim(trend_min * 1.05, trend_max * 1.05)
+    ax_trend_cmip6.set_ylim(trend_min * 1.05, trend_max * 1.05)
+    ax_var_cmip5.set_ylim(var_min, var_max * 1.05)
+    ax_var_cmip6.set_ylim(var_min, var_max * 1.05)
+    ax_trend_cmip6.tick_params(axis='y', labelleft=False)
+    ax_var_cmip6.tick_params(axis='y', labelleft=False)
+
+    plt.suptitle(f'ODSL CMIP scenario comparison\nNorth Atlantic region ({EXTENT[0]}°E-{EXTENT[1]}°E, {EXTENT[2]}°N-{EXTENT[3]}°N)', fontsize=16, fontweight='bold', y=0.98)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(os.path.join(fig_dir, 'cmip_scenario_timeseries_comparison.png'), dpi=300, bbox_inches='tight')
     plt.show()
