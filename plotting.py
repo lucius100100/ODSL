@@ -12,6 +12,7 @@ import pandas as pd
 import xesmf as xe
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mticker
+import seaborn as sns
 
 def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_results, scenario_results, fig_dir):
     """Generate all figures for the analysis."""
@@ -538,7 +539,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     #plotting
     model_names = df_sorted.index.tolist()
     x = np.arange(len(model_names))
-    fig, ax = plt.subplots(figsize=(14, 8))
+    fig, ax = plt.subplots(figsize=(16, 10))
     
     mean_rmse_all, min_rmse_all, max_rmse_all, obs_period_rmse = df_sorted['mean_rmse'], df_sorted['min_rmse'], df_sorted['max_rmse'], df_sorted['obs_period_rmse']
     mean_pcc_all, min_pcc_all, max_pcc_all, obs_period_pcc = df_sorted['mean_pcc'], df_sorted['min_pcc'], df_sorted['max_pcc'], df_sorted['obs_period_pcc']
@@ -563,10 +564,30 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     max_pcc_scaled = (max_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
     obs_pcc_scaled = (obs_period_pcc - pcc_min_val) * pcc_scale_factor + pcc_offset
 
-    ax.bar(x, mean_rmse_scaled, 0.8, color='grey', alpha=0.5, edgecolor='black', linewidth=1.5, label='Mean RMSE (all sliding windows)')
+    #violin
+    df_rmse_long = rmse_ts.to_dataframe(name='rmse').reset_index()
+    df_pcc_long = pcc_ts.to_dataframe(name='pcc').reset_index()
+    df_rmse_long['rmse_scaled'] = df_rmse_long['rmse'] * rmse_scale_factor
+    df_pcc_long['pcc_scaled'] = (df_pcc_long['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
+    model_order = df_sorted.index.tolist()
+
+    #violin plots
+    sns.violinplot(data=df_rmse_long, x='model', y='rmse_scaled', order=model_order, ax=ax, color='grey', alpha=0.4, inner=None, saturation=0.7, zorder=1, cut=0)
+    sns.violinplot(data=df_pcc_long, x='model', y='pcc_scaled', order=model_order, ax=ax, color='red', alpha=0.4, inner=None, saturation=0.7, zorder=1, cut=0)
+
+    #mean RMSE
+    mean_rmse_line_plotted = False
+    for i, (x_pos, mean_val) in enumerate(zip(x, mean_rmse_scaled)):
+        if not np.isnan(mean_val):
+            label = 'Mean RMSE (all sliding windows)' if not mean_rmse_line_plotted else ""
+            ax.plot([x_pos - 0.2, x_pos + 0.2], [mean_val, mean_val], color='black', linewidth=2, zorder=3, label=label)
+            mean_rmse_line_plotted = True
+
+    #range RMSE
     ax.errorbar(x, mean_rmse_scaled, yerr=[mean_rmse_scaled - min_rmse_scaled, max_rmse_scaled - mean_rmse_scaled], fmt='none', color='black', capsize=6, capthick=1.5, label='RMSE range (all sliding windows)')
     ax.scatter(x, obs_rmse_scaled, color='black', s=80, zorder=5, label='RMSE over observed period')
     
+    #mean PCC
     mean_line_plotted = False
     for i, (x_pos, mean_val) in enumerate(zip(x, mean_pcc_scaled)):
         if not np.isnan(mean_val):
@@ -574,6 +595,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
             ax.plot([x_pos - 0.2, x_pos + 0.2], [mean_val, mean_val], color='red', linewidth=2, zorder=3, label=label)
             mean_line_plotted = True
     
+    #range PCC
     ax.errorbar(x, mean_pcc_scaled, yerr=[mean_pcc_scaled - min_pcc_scaled, max_pcc_scaled - mean_pcc_scaled], fmt='none', color='red', capsize=6, capthick=1.5, label='PCC range (all sliding windows)')
     ax.scatter(x, obs_pcc_scaled, color='red', s=80, zorder=5, label='PCC over observed period')
 
@@ -611,13 +633,21 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
 
     #ordered legend
     handles, labels = ax.get_legend_handles_labels()
+
+    rmse_violin_patch = mpatches.Patch(color='grey', alpha=0.5, label='RMSE distribution (all sliding windows)')
+    pcc_violin_patch = mpatches.Patch(color='red', alpha=0.5, label='PCC distribution (all sliding windows)')
+    handles.extend([rmse_violin_patch, pcc_violin_patch])
+    labels.extend(['RMSE distribution (all sliding windows)', 'PCC distribution (all sliding windows)'])
+
     desired_order = [
     'PCC over observed period',
     'Mean PCC (all sliding windows)',
     'PCC range (all sliding windows)',
+    'PCC distribution (all sliding windows)',
     'RMSE over observed period',
     'Mean RMSE (all sliding windows)',
-    'RMSE range (all sliding windows)'
+    'RMSE range (all sliding windows)',
+    'RMSE distribution (all sliding windows)'
     ]
 
     label_handle_map = dict(zip(labels, handles))
