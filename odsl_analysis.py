@@ -33,6 +33,7 @@ if not os.path.exists(fig_dir):
 @cache_result('observed_odsl')
 def calculate_observed_odsl():
     """Calculate observed ODSL from components."""
+
     print("\nCalculating observed ODSL...")
     
     #load data
@@ -194,6 +195,7 @@ def process_cmip_models():
 @cache_result('sliding_window_results')
 def perform_sliding_window_analysis():
     """Sliding window analysis on all models."""
+    
     print("\nSliding window analysis...")
     
     #processed models
@@ -583,7 +585,7 @@ def analyze_na_modes():
 
     #EOF
     solver = Eof(mmm_detrended, weights=weights)
-    n_modes = 3
+    n_modes = 5
     eofs = solver.eofs(neofs=n_modes)
     pcs = solver.pcs(npcs=n_modes, pcscaling=1)
     variance_fractions = solver.varianceFraction(neigs=n_modes)
@@ -623,8 +625,8 @@ def analyze_na_modes():
     nao_corr_da = xr.DataArray(correlations['nao'], coords={'mode': np.arange(n_modes)}, dims=['mode'])
     amo_corr_da = xr.DataArray(correlations['amo'], coords={'mode': np.arange(n_modes)}, dims=['mode'])
 
-    print("Correlations with NAO Index (PC1, PC2, PC3):", np.round(correlations['nao'], 2))
-    print("Correlations with AMO Index (PC1, PC2, PC3):", np.round(correlations['amo'], 2))
+    print("Correlations with NAO Index (PC1, PC2, PC3, PC4, PC5):", np.round(correlations['nao'], 2))
+    print("Correlations with AMO Index (PC1, PC2, PC3, PC4, PC5):", np.round(correlations['amo'], 2))
 
     #output
     output_ds = xr.Dataset({

@@ -15,6 +15,7 @@ import matplotlib.ticker as mticker
 
 def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_results, scenario_results, fig_dir):
     """Generate all figures for the analysis."""
+
     if not os.path.exists(fig_dir):
         os.makedirs(fig_dir)
 
@@ -22,6 +23,7 @@ def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_res
     if not os.path.exists(variable_fig_dir):
         os.makedirs(variable_fig_dir)
 
+    plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir)
     plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, variable_fig_dir)
     plot_lowess_fit(lowess_results_df, variable_fig_dir)
     plot_scenario_comparison(scenario_results, variable_fig_dir)
@@ -38,7 +40,7 @@ def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_res
     plot_observed_vs_modeled(cmip_results, sliding_results, variable_fig_dir)
     plot_sliding_window_timeseries(sliding_results, variable_fig_dir)
     plot_best_matching_periods(sliding_results, variable_fig_dir)
-    plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir)
+    #plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir)
 
 def add_map_features(ax, extent, is_left=False, is_bottom=False):
     """Add standard map features to axis."""
@@ -61,8 +63,7 @@ def add_map_features(ax, extent, is_left=False, is_bottom=False):
     ax.add_feature(cfeature.LAND, color='lightgray', zorder=1)
     ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
     
-    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
-                      linewidth=0.5, color='gray', alpha=0.5, linestyle='-')
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='-')
     gl.top_labels = False
     gl.right_labels = False
     gl.left_labels = is_left
@@ -562,18 +563,18 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     max_pcc_scaled = (max_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
     obs_pcc_scaled = (obs_period_pcc - pcc_min_val) * pcc_scale_factor + pcc_offset
 
-    ax.bar(x, mean_rmse_scaled, 0.8, color='grey', alpha=0.5, edgecolor='black', linewidth=1.5, label='Mean RMSE')
-    ax.errorbar(x, mean_rmse_scaled, yerr=[mean_rmse_scaled - min_rmse_scaled, max_rmse_scaled - mean_rmse_scaled], fmt='none', color='black', capsize=6, capthick=1.5, label='RMSE range')
+    ax.bar(x, mean_rmse_scaled, 0.8, color='grey', alpha=0.5, edgecolor='black', linewidth=1.5, label='Mean RMSE (all sliding windows)')
+    ax.errorbar(x, mean_rmse_scaled, yerr=[mean_rmse_scaled - min_rmse_scaled, max_rmse_scaled - mean_rmse_scaled], fmt='none', color='black', capsize=6, capthick=1.5, label='RMSE range (all sliding windows)')
     ax.scatter(x, obs_rmse_scaled, color='black', s=80, zorder=5, label='RMSE over observed period')
     
     mean_line_plotted = False
     for i, (x_pos, mean_val) in enumerate(zip(x, mean_pcc_scaled)):
         if not np.isnan(mean_val):
-            label = 'Mean PCC' if not mean_line_plotted else ""
+            label = 'Mean PCC (all sliding windows)' if not mean_line_plotted else ""
             ax.plot([x_pos - 0.2, x_pos + 0.2], [mean_val, mean_val], color='red', linewidth=2, zorder=3, label=label)
             mean_line_plotted = True
     
-    ax.errorbar(x, mean_pcc_scaled, yerr=[mean_pcc_scaled - min_pcc_scaled, max_pcc_scaled - mean_pcc_scaled], fmt='none', color='red', capsize=6, capthick=1.5, label='PCC range')
+    ax.errorbar(x, mean_pcc_scaled, yerr=[mean_pcc_scaled - min_pcc_scaled, max_pcc_scaled - mean_pcc_scaled], fmt='none', color='red', capsize=6, capthick=1.5, label='PCC range (all sliding windows)')
     ax.scatter(x, obs_pcc_scaled, color='red', s=80, zorder=5, label='PCC over observed period')
 
     ax.set_xlabel('Model', fontsize=12)
@@ -608,7 +609,22 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     for tick in ax.get_yticks(): ax.axhline(y=tick, color='gray', linestyle='-', alpha=0.2, linewidth=0.5, zorder=0)
     for tick in ax2.get_yticks(): ax.axhline(y=tick, color='gray', linestyle='-', alpha=0.2, linewidth=0.5, zorder=0)
 
-    ax.legend(loc='upper left', bbox_to_anchor=(0, 0.5), fontsize=10)
+    #ordered legend
+    handles, labels = ax.get_legend_handles_labels()
+    desired_order = [
+    'PCC over observed period',
+    'Mean PCC (all sliding windows)',
+    'PCC range (all sliding windows)',
+    'RMSE over observed period',
+    'Mean RMSE (all sliding windows)',
+    'RMSE range (all sliding windows)'
+    ]
+
+    label_handle_map = dict(zip(labels, handles))
+    reordered_handles = [label_handle_map[label] for label in desired_order if label in label_handle_map]
+    reordered_labels = [label for label in desired_order if label in label_handle_map]
+    ax.legend(reordered_handles, reordered_labels, loc='upper left', bbox_to_anchor=(0, 0.5), fontsize=10)
+
     plt.tight_layout()
     plt.savefig(os.path.join(fig_dir, f'model_comparison_summary_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
     plt.show()

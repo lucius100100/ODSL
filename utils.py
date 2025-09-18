@@ -44,6 +44,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 def cache_result(cache_key_prefix):
     """Cache function, prioritize netcdf, csv, and json, pickle only if necessary."""
+    
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -118,6 +119,7 @@ def cache_result(cache_key_prefix):
 
 def _convert_for_json(obj):
     """Convert numpy types and other non-JSON-serializable objects to JSON-compatible types"""
+
     if isinstance(obj, dict):
         return {key: _convert_for_json(value) for key, value in obj.items()}
     elif isinstance(obj, list):
@@ -135,13 +137,16 @@ def _convert_for_json(obj):
 
 def rotate_longitude(ds, name_lon):
     """Convert longitude from 0-360 to -180-180 coordinate system."""
+
     ds_copy = ds.copy()
     new_lon_values = (((ds_copy[name_lon] + 180) % 360) - 180)
     ds_copy = ds_copy.assign_coords({name_lon: new_lon_values})
+
     return ds_copy.sortby(ds_copy[name_lon])
 
 def calculate_weighted_stats(data_x, mask, data_y=None):
     """Calculates area-weighted statistics based on the supplementary material 'Computation of metrics used in the analysis' from Richter et al. 2017."""
+
     #grid of weights based on the cosine of the latitude
     weights = np.cos(np.deg2rad(data_x.latitude))
     weights.name = "weights"
@@ -206,11 +211,13 @@ def calculate_weighted_stats(data_x, mask, data_y=None):
 
 def create_region_mask(data_array, extent):
     """Create a mask for regionwide statistics for the North Atlantic region."""
+
     lon_min, lon_max, lat_min, lat_max = extent
     mask = ((data_array.longitude >= lon_min) & 
             (data_array.longitude <= lon_max) & 
             (data_array.latitude >= lat_min) & 
             (data_array.latitude <= lat_max))
+    
     return mask
 
 def detrend_timeseries(data_array, degree=1, dim='time'):

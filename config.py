@@ -3,11 +3,11 @@ CMIP_VERSION               = 'CMIP6'           #CMIP version to be used: 'CMIP5'
 START_YEAR                 = 1993              #observed period
 END_YEAR                   = 2024
 #EXTENT                     = [-65, 40, 50, 80] #North Atlantic
-EXTENT                     = [-100, 20, 5, 80] #North Atlantic
+EXTENT                     = [-100, 20, 8, 80] #North Atlantic
 USE_CACHE                  = True              #cache settings
 FORCE_RECOMPUTE            = False
 VARIABILITY_DETREND_DEGREE = 4                 #variability polynomial degree: 1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
-PLOT_VARIABLE              = 'variability'     #what to plot: 'trend', 'variability'
+PLOT_VARIABLE              = 'trend'     #what to plot: 'trend', 'variability'
 CMIP5_FUTURE_SCENARIO      = 'rcp45'           #CMIP future scenario to be used after historical
 CMIP6_FUTURE_SCENARIO      = 'ssp245'
 LOWESS_FRAC                = 0.5               #LOWESS smoothing parameter (between 0 and 1)
@@ -26,10 +26,14 @@ PLOT_CONFIG = {
 }
 
 #projection
+lon_min, lon_max, lat_min, lat_max = EXTENT
+center_lon = (lon_min + lon_max) / 2
+center_lat = (lat_min + lat_max) / 2
+
 PROJECTION_PARAMS = {
-    'central_longitude': -15.0,
-    'central_latitude': 60.0,
-    'standard_parallels': (55.0, 75.0)
+    'central_longitude': center_lon,
+    'central_latitude': center_lat,
+    'standard_parallels': (lat_min + 10, lat_max - 10)
 }
 
 #CMIP scenarios

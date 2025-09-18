@@ -309,7 +309,6 @@ def load_amo_index():
         print(f"An error occurred while loading the AMO index: {e}")
         return None
 
-
 @cache_result('nao_index_yearly')
 def load_nao_index():
     """Loads the monthly NAO index from the provided text file, handles its specific multi-column format, and computes annual averages."""
