@@ -1,22 +1,25 @@
 #parameters
-START_YEAR = 1993                #observed period
-END_YEAR = 2012
-EXTENT = [-65, 40, 50, 80]       #North Atlantic
-USE_CACHE = True                 #cache settings
-FORCE_RECOMPUTE = False
-VARIABILITY_DETREND_DEGREE = 1   #variability polynomial degree: 1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
-PLOT_VARIABLE = 'variability'    #what to plot: 'trend', 'variability'
-CMIP5_FUTURE_SCENARIO = 'rcp45'  #CMIP future scenario to be used after historical
-CMIP6_FUTURE_SCENARIO = 'ssp245'
+CMIP_VERSION               = 'CMIP6'           #CMIP version to be used: 'CMIP5' or 'CMIP6'
+START_YEAR                 = 1993              #observed period
+END_YEAR                   = 2024
+#EXTENT                     = [-65, 40, 50, 80] #North Atlantic
+EXTENT                     = [-100, 20, 5, 80] #North Atlantic
+USE_CACHE                  = True              #cache settings
+FORCE_RECOMPUTE            = False
+VARIABILITY_DETREND_DEGREE = 4                 #variability polynomial degree: 1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
+PLOT_VARIABLE              = 'variability'     #what to plot: 'trend', 'variability'
+CMIP5_FUTURE_SCENARIO      = 'rcp45'           #CMIP future scenario to be used after historical
+CMIP6_FUTURE_SCENARIO      = 'ssp245'
+LOWESS_FRAC                = 0.5               #LOWESS smoothing parameter (between 0 and 1)
 
 PLOT_CONFIG = {
     'trend': {
-        'name': 'Trend',
+        'name': 'trend',
         'units': 'mm/yr',
         'cmap': 'coolwarm'
     },
     'variability': {
-        'name': 'Variability',
+        'name': 'variability',
         'units': 'cm',
         'cmap': 'viridis'
     }

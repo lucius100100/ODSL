@@ -1,9 +1,9 @@
-from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name)
+from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name, load_amo_index, load_nao_index)
 from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries)
 from plotting import create_all_figures 
-from config import (START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO)
+from config import (CMIP_VERSION, START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO, LOWESS_FRAC)
 
-setup_esmf_environment()
+#setup_esmf_environment()
 
 import os
 import numpy as np
@@ -12,6 +12,18 @@ import xesmf as xe
 import pandas as pd
 import traceback
 from scipy import stats
+import statsmodels.api as sm
+from eofs.xarray import Eof
+
+#correct configuration
+if CMIP_VERSION == 'CMIP5':
+    TARGET_MODELS = TARGET_CMIP5_MODELS
+    FUTURE_SCENARIO = CMIP5_FUTURE_SCENARIO
+elif CMIP_VERSION == 'CMIP6':
+    TARGET_MODELS = TARGET_CMIP6_MODELS
+    FUTURE_SCENARIO = CMIP6_FUTURE_SCENARIO
+else:
+    raise ValueError(f"Unsupported CMIP_VERSION: {CMIP_VERSION}. Must be 'CMIP5' or 'CMIP6'.")
 
 #figures directory
 fig_dir = './figures/'
@@ -93,12 +105,12 @@ def calculate_observed_odsl():
 
     return output_ds
 
-@cache_result('cmip5_processed_models')
-def process_cmip5_models():
-    """Process CMIP5 models and return a single dataset."""
-    print("\nProcessing CMIP5 models...")
+@cache_result('processed_CMIP_models')
+def process_cmip_models():
+    """Process CMIP models and return a single dataset."""
+    print(f"\nProcessing {CMIP_VERSION} models...")
     
-    inventory = get_cmip_files_inventory("CMIP5")
+    inventory = get_cmip_files_inventory(CMIP_VERSION)
     all_files = inventory['all_files']
     
     #initialize
@@ -109,16 +121,16 @@ def process_cmip5_models():
     region_masks_list = []
     trend_stats_list = []
     
-    for i, model_name in enumerate(TARGET_CMIP5_MODELS):
+    for i, model_name in enumerate(TARGET_MODELS):
         hist_file = all_files['historical'].get(model_name)
-        rcp45_file = all_files['rcp45'].get(model_name)
+        future_file = all_files[FUTURE_SCENARIO].get(model_name)
         
-        if hist_file and rcp45_file:
-            print(f"Processing model: {model_name} ({i+1}/{len(TARGET_CMIP5_MODELS)})")
-            
+        if hist_file and future_file:
+            print(f"Processing model: {model_name} ({i+1}/{len(TARGET_MODELS)})")
+
             try:
                 #calculations per model
-                combined_zos = load_cmip_model_data(model_name, future_scenario=CMIP5_FUTURE_SCENARIO, cmip_version="CMIP5")
+                combined_zos = load_cmip_model_data(model_name, future_scenario=FUTURE_SCENARIO, cmip_version=CMIP_VERSION)
                 region_mask = create_region_mask(combined_zos.isel(time=0), EXTENT)
                 
                 period_data = combined_zos.sel(time=slice(START_YEAR, END_YEAR))
@@ -143,7 +155,7 @@ def process_cmip5_models():
             except Exception as e:
                 print(f"Could not process model {model_name}: {e}")
 
-    print(f"\nProcessed {len(model_names)} out of {len(TARGET_CMIP5_MODELS)} models")
+    print(f"\nProcessed {len(model_names)} out of {len(TARGET_MODELS)} models")
 
     #concatenate
     model_trends = xr.concat(trends_list, dim=pd.Index(model_names, name='model'))
@@ -174,7 +186,7 @@ def process_cmip5_models():
     )
     
     #global attributes
-    output_ds.attrs['description'] = "Processed CMIP5 model trends, variability, and timeseries."
+    output_ds.attrs['description'] = f"Processed {CMIP_VERSION} model trends, variability, and timeseries."
     output_ds.attrs['valid_models_count'] = len(model_names)
     
     return output_ds
@@ -185,7 +197,7 @@ def perform_sliding_window_analysis():
     print("\nSliding window analysis...")
     
     #processed models
-    cmip_results_ds = process_cmip5_models() 
+    cmip_results_ds = process_cmip_models() 
     obs_results = calculate_observed_odsl()
     odsl_mm_yr = obs_results['odsl']
     
@@ -245,8 +257,8 @@ def perform_sliding_window_analysis():
         windows_per_model = []
 
         #slide window
-        window_size = 20
-        start_year = 1850
+        window_size = END_YEAR - START_YEAR + 1
+        start_year = int(cmip_results_ds.full_timeseries.time.min().item())
         end_year = END_YEAR
         
         for window_start in range(start_year, end_year - window_size + 1):
@@ -262,9 +274,7 @@ def perform_sliding_window_analysis():
             trend_mm_yr = trend_coeffs.polyfit_coefficients.sel(degree=1) * 10
             
             #variability
-            p_var = window_data.polyfit(dim='time', deg=1)
-            fit_var = xr.polyval(window_data['time'], p_var.polyfit_coefficients)
-            detrended_window = window_data - fit_var
+            detrended_window = detrend_timeseries(window_data, degree=VARIABILITY_DETREND_DEGREE, dim='time')
             variability_map = detrended_window.std(dim='time')
             
             #center the modeled variability
@@ -318,6 +328,7 @@ def perform_sliding_window_analysis():
             'pcc_variability': (('model', 'window_start_year'), all_pcc_var),
             'rmse_variability': (('model', 'window_start_year'), all_rmse_var),
             'odsl_var_obs_centered': odsl_var_obs_centered, 
+            'odsl_var_obs_regridded': odsl_var_obs_regridded,
         },
         coords={
             'model': model_names_for_sliding,
@@ -440,7 +451,7 @@ def compare_with_steric_record():
 
 @cache_result('cmip_scenario_timeseries_results')
 def process_cmip_scenario_data():
-    """Process CMIP5/6 data to get ensemble timeseries for each scenario."""
+    """Process CMIP data to get ensemble timeseries for each scenario."""
     print("\nProcessing CMIP scenario ensembles")
     
     final_results = []
@@ -513,22 +524,141 @@ def process_cmip_scenario_data():
     print(f"Successfully processed timeseries for {len(final_results)} CMIP versions")
     return combined_results
 
+@cache_result('lowess_fit_variability')
+def calculate_lowess_fit():
+    """Calculates and caches the LOWESS fit by loading the necessary precursor data."""
+
+    print(f"\nCalculating and caching LOWESS fit with frac={LOWESS_FRAC}...")
+
+    #load data
+    sliding_results = perform_sliding_window_analysis()
+    cmip_results = process_cmip_models()
+    obs_data = sliding_results['odsl_var_obs_regridded']
+    model_data = cmip_results['model_mean_variability']
+
+    #flatten
+    x_flat = obs_data.values.flatten()
+    y_flat = model_data.values.flatten()
+
+    #mask
+    valid_mask = ~np.isnan(x_flat) & ~np.isnan(y_flat)
+    obs_points = x_flat[valid_mask]
+    model_points = y_flat[valid_mask]
+
+    #LOWESS calculation
+    lowess_result = sm.nonparametric.lowess(endog=model_points, exog=obs_points, frac=LOWESS_FRAC)
+    
+    #combine
+    raw_points_df = pd.DataFrame({'obs_points': obs_points, 'model_points': model_points})
+    fit_df = pd.DataFrame(lowess_result, columns=['x_fit', 'y_fit'])
+    combined_df = pd.concat([raw_points_df, fit_df], axis=1)
+    
+    combined_df.attrs['frac'] = LOWESS_FRAC
+    
+    print("LOWESS fit calculation complete.")
+    return combined_df
+
+@cache_result('NA_modes')
+def analyze_na_modes():
+    """Identifies dominant modes of variability in observed and modeled ODSL using Empirical Orthogonal Function (EOF) analysis."""
+
+    print("\nIdentifying North Atlantic variability modes with EOF analysis...")
+
+    #load data
+    cmip_results_ds = process_cmip_models()
+    obs_results_ds = calculate_observed_odsl()
+
+    #detrend
+    obs_variability = obs_results_ds['variability']
+    model_full_ts = cmip_results_ds['full_timeseries'].sel(time=slice(START_YEAR, END_YEAR))
+    model_full_ts['time'] = model_full_ts['time'].astype(int)
+    model_detrended = detrend_timeseries(model_full_ts, degree=VARIABILITY_DETREND_DEGREE, dim='time')
+    
+    #multi-model mean
+    mmm_detrended = model_detrended.mean(dim='model')
+
+    #cosine latitude weights array
+    coslat = np.cos(np.deg2rad(mmm_detrended['latitude'].values))
+    weights = np.sqrt(coslat)[..., np.newaxis] 
+
+    #EOF
+    solver = Eof(mmm_detrended, weights=weights)
+    n_modes = 3
+    eofs = solver.eofs(neofs=n_modes)
+    pcs = solver.pcs(npcs=n_modes, pcscaling=1)
+    variance_fractions = solver.varianceFraction(neigs=n_modes)
+
+    #correlate PCs with modes
+    nao_ds = load_nao_index()
+    amo_ds = load_amo_index()
+    nao_ts = nao_ds['nao_index'] if nao_ds is not None else None
+    amo_ts = amo_ds['amo_index'] if amo_ds is not None else None
+
+    correlations = {'nao': [], 'amo': []}
+    
+    for i in range(n_modes):
+        pc = pcs.sel(mode=i)
+        
+        #NAO
+        if nao_ts is not None:
+            pc_aligned, nao_aligned = xr.align(pc, nao_ts, join='inner')
+
+            if pc_aligned.size > 0:
+                corr_val = xr.corr(pc_aligned, nao_aligned, dim='time').values.item()
+                correlations['nao'].append(corr_val)
+            else:
+                correlations['nao'].append(np.nan)
+
+        #AMO
+        if amo_ts is not None:
+            pc_aligned, amo_aligned = xr.align(pc, amo_ts, join='inner')
+
+            if pc_aligned.size > 0:
+                corr_val = xr.corr(pc_aligned, amo_aligned, dim='time').values.item()
+                correlations['amo'].append(corr_val)
+            else:
+                correlations['amo'].append(np.nan)
+
+    #lists to xarray DataArray
+    nao_corr_da = xr.DataArray(correlations['nao'], coords={'mode': np.arange(n_modes)}, dims=['mode'])
+    amo_corr_da = xr.DataArray(correlations['amo'], coords={'mode': np.arange(n_modes)}, dims=['mode'])
+
+    print("Correlations with NAO Index (PC1, PC2, PC3):", np.round(correlations['nao'], 2))
+    print("Correlations with AMO Index (PC1, PC2, PC3):", np.round(correlations['amo'], 2))
+
+    #output
+    output_ds = xr.Dataset({
+        'eofs': eofs,
+        'pcs': pcs,
+        'variance_fractions': variance_fractions,
+        'nao_index': nao_ts,
+        'amo_index': amo_ts,
+        'nao_corr': nao_corr_da, 
+        'amo_corr': amo_corr_da
+    })
+    output_ds.attrs['description'] = f"EOF analysis results for {n_modes} modes of ODSL variability."
+
+    return output_ds
+
 def main():
     """Run complete analysis."""
+
     print("ODSL analysis...")
     fig_dir = './figures/'
 
     #observed ODSL
     obs_results = calculate_observed_odsl()
     print(f"Observed ODSL range: {obs_results['odsl'].min().item():.2f} to {obs_results['odsl'].max().item():.2f} mm/yr")
+    print("Completed observed ODSL calculation.")
     
     #steric record
     steric_comparison = compare_with_steric_record()
+    print("Completed steric record comparison.")
     
     #CMIP models
-    cmip_results = process_cmip5_models()
-    print(f"Processed {cmip_results.attrs['valid_models_count']} CMIP5 models")
-    
+    cmip_results = process_cmip_models()
+    print(f"Processed {cmip_results.attrs['valid_models_count']} CMIP models")
+
     #sliding window analysis
     sliding_results = perform_sliding_window_analysis()
     print("Completed sliding window analysis")
@@ -536,10 +666,16 @@ def main():
     scenario_results = process_cmip_scenario_data()
     print("Completed scenario data processing")
 
+    lowess_results = calculate_lowess_fit()
+    print("Completed LOWESS fit calculation")
+
+    na_modes_results = analyze_na_modes()
+    print("Completed North Atlantic modes analysis.")
+
     print("\nAll calculations complete. Generating figures...")
 
     #figures
-    create_all_figures(obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, fig_dir=fig_dir)
+    create_all_figures(lowess_results_df=lowess_results, obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, fig_dir=fig_dir)
     print("All figures generated!")
 
 if __name__ == "__main__":

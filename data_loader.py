@@ -20,11 +20,22 @@
 #----------------------------------------------------------------------------------------#
 
 from utils import (cache_result, rotate_longitude)
-from config import (TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO)
+from config import (CMIP_VERSION, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO)
 
 import xarray as xr
 import os
 import glob
+import pandas as pd
+
+#correct configuration
+if CMIP_VERSION == 'CMIP5':
+    TARGET_MODELS = TARGET_CMIP5_MODELS
+    FUTURE_SCENARIO = CMIP5_FUTURE_SCENARIO
+elif CMIP_VERSION == 'CMIP6':
+    TARGET_MODELS = TARGET_CMIP6_MODELS
+    FUTURE_SCENARIO = CMIP6_FUTURE_SCENARIO
+else:
+    raise ValueError(f"Unsupported CMIP_VERSION: {CMIP_VERSION}. Must be 'CMIP5' or 'CMIP6'.")
 
 def find_folder_by_name(folder_name, start_path=None, max_depth=5):
     """Search for a folder by name, starting from current directory and going up."""
@@ -191,7 +202,7 @@ def get_scenario_files(cmip_version, scenario, base_path, return_models=False):
     return files
 
 @cache_result('cmip_files_inventory')
-def get_cmip_files_inventory(cmip_version="CMIP5"):
+def get_cmip_files_inventory(cmip_version):
     """Get inventory of all available CMIP files."""
     print(f"Finding all available {cmip_version} models and files...")
     
@@ -223,9 +234,12 @@ def get_cmip_files_inventory(cmip_version="CMIP5"):
         'base_path': base_path
     }
 
-def load_cmip_model_data(model_name, hist_scenario='historical', future_scenario=None, cmip_version="CMIP5", start_year=None, end_year=None):
+def load_cmip_model_data(model_name, hist_scenario='historical', future_scenario=None, cmip_version=None, start_year=None, end_year=None):
     """Load and process a single CMIP model, optionally combining historical and future scenarios."""
     
+    if cmip_version is None:
+        raise ValueError("CMIP_VERSION must be provided ('CMIP5' or 'CMIP6').")
+
     #files inventory
     inventory = get_cmip_files_inventory(cmip_version)
     all_files = inventory['all_files']
@@ -263,3 +277,65 @@ def load_cmip_model_data(model_name, hist_scenario='historical', future_scenario
             combined_zos = combined_zos.sel(time=time_slice)
         
         return combined_zos
+
+@cache_result('amo_index_yearly')
+def load_amo_index():
+    """Loads the ERSST AMO index from the provided text file, skips the header, and computes annual averages."""
+    
+    print("Loading AMO index data...")
+
+    try:
+        modes_dir = find_folder_by_name("Modes")
+        amo_file_path = os.path.join(modes_dir, "AMO", "AMO_monthly.txt")
+
+        #load
+        df = pd.read_csv(amo_file_path, skiprows=2, header=None, sep=r'\s+', names=['year', 'month', 'ssta'])
+
+        #annual mean SSTA
+        yearly_amo = df.groupby('year')['ssta'].mean().reset_index()
+
+        #xarray DataArray
+        amo_da = xr.DataArray(data=yearly_amo['ssta'].values, coords={'year': yearly_amo['year'].values}, dims=['year'],name='amo_index').rename({'year': 'time'})
+        amo_da['time'] = amo_da['time'].astype(int)
+        
+        print(f"Loaded AMO index from {yearly_amo['year'].min()} to {yearly_amo['year'].max()}")
+
+        return amo_da.to_dataset(name='amo_index')
+
+    except FileNotFoundError:
+        print("Warning: AMO_monthly.txt not found in the expected Modes/AMO directory.")
+        return None
+    except Exception as e:
+        print(f"An error occurred while loading the AMO index: {e}")
+        return None
+
+
+@cache_result('nao_index_yearly')
+def load_nao_index():
+    """Loads the monthly NAO index from the provided text file, handles its specific multi-column format, and computes annual averages."""
+
+    print("Loading NAO index data...")
+
+    try:
+        modes_dir = find_folder_by_name("Modes")
+        nao_file_path = os.path.join(modes_dir, "NAO", "NAO_monthly.txt")
+
+        #load
+        df = pd.read_csv(nao_file_path, header=0, sep=r'\s+', index_col=0)
+
+        yearly_nao = df.mean(axis=1)
+        yearly_nao.name = 'nao_index'
+        nao_da = yearly_nao.to_xarray()
+        nao_da = nao_da.rename({'index': 'time'})
+        nao_da['time'] = nao_da['time'].astype(int)
+
+        print(f"Loaded NAO index from {int(nao_da.time.min().item())} to {int(nao_da.time.max().item())}")
+
+        return nao_da.to_dataset(name='nao_index')
+
+    except FileNotFoundError:
+        print("Warning: NAO_monthly.txt not found in the expected Modes/NAO directory.")
+        return None
+    except Exception as e:
+        print(f"An error occurred while loading the NAO index: {e}")
+        return None
