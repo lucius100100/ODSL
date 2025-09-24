@@ -1,3 +1,9 @@
+"""
+@author: L.G. van Dijk (l.g.vandijk1@students.uu.nl, luc.van.dijk@knmi.nl, luciusvandijk@gmail.com)
+
+Data loading functions for ODSL analysis.
+"""
+
 ### --- OBSERVATIONAL DATA --- ###
 #----------------------------------------------------------------------------------------#
 # --- Altimetry data ---
@@ -39,6 +45,7 @@ else:
 
 def find_folder_by_name(folder_name, start_path=None, max_depth=5):
     """Search for a folder by name, starting from current directory and going up."""
+
     if start_path is None:
         start_path = os.path.dirname(os.path.abspath(__file__))
     
@@ -58,6 +65,7 @@ def find_folder_by_name(folder_name, start_path=None, max_depth=5):
 @cache_result('altimetry_data')
 def load_altimetry_data():
     """Load and process altimetry data."""
+
     print("Loading altimetry data...")
     try:
         duacs_dir = find_folder_by_name("Altimetry")
@@ -77,6 +85,7 @@ def load_altimetry_data():
 @cache_result('budget_data')
 def load_budget_data(extend_to_year=None):
     """Load Frederikse budget data."""
+
     try:
         budget_parent = find_folder_by_name("Budget")
         budget_dir = os.path.join(budget_parent, "Frederikse")
@@ -126,6 +135,7 @@ def load_budget_data(extend_to_year=None):
 @cache_result('gia_data')
 def load_gia_data():
     """Load GIA data."""
+
     try:
         gia_dir = find_folder_by_name("GIA")
     except FileNotFoundError:
@@ -134,7 +144,9 @@ def load_gia_data():
     fig_dir = './figures/'
     if not os.path.exists(fig_dir):
         os.makedirs(fig_dir)
+
     print("Loading GIA data...")
+    
     gia_rad_file = os.path.join(gia_dir, 'drad.1grid_O512.nc')
     gia_sea_file = os.path.join(gia_dir, 'dsea.1grid_O512.nc')
     gia_rad = xr.open_dataset(gia_rad_file)
@@ -338,3 +350,14 @@ def load_nao_index():
     except Exception as e:
         print(f"An error occurred while loading the NAO index: {e}")
         return None
+    
+def load_climate_indices_dict():
+    """Load all climate indices into a dictionary."""
+
+    nao_ds = load_nao_index()
+    amo_ds = load_amo_index()
+    
+    return {
+        'nao': nao_ds['nao_index'] if nao_ds is not None else None,
+        'amo': amo_ds['amo_index'] if amo_ds is not None else None
+    }

@@ -1,5 +1,11 @@
-from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name, load_amo_index, load_nao_index)
-from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries)
+"""
+@author: L.G. van Dijk (l.g.vandijk1@students.uu.nl, luc.van.dijk@knmi.nl, luciusvandijk@gmail.com)
+
+Execute the full ODSL calculations / analysis and plotting.
+"""
+
+from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name, load_amo_index, load_nao_index, load_climate_indices_dict)
+from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries, calculate_single_eof, calculate_pc_index_correlations)
 from plotting import create_all_figures 
 from config import (CMIP_VERSION, START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO, LOWESS_FRAC)
 
@@ -82,6 +88,26 @@ def calculate_observed_odsl():
     detrended_sla = detrend_timeseries(sla_period, degree=VARIABILITY_DETREND_DEGREE, dim='year')
     observed_variability = detrended_sla.std(dim='year')
 
+    print("Calculating yearly ODSL fields...")
+    
+    #yearly ODSL fields
+    sla_yearly_mm = duacs_yearly.sla.sel(year=common_years) * 10  #cm -> mm
+    asl_yearly = asl_frederikse.sel(year=common_years)
+    
+    #regrid
+    asl_yearly_regridded = regridder_frederikse(asl_yearly)
+    time_delta = xr.DataArray(common_years - common_years[0], dims='year', coords={'year': common_years})
+    gia_cumulative_signal = gia_geoid_correction_mm_yr * time_delta
+    
+    #subtract yearly budget and cumulative GIA
+    odsl_yearly_fields = sla_yearly_mm - asl_yearly_regridded - gia_cumulative_signal
+    
+    #anomaly from global mean
+    temporal_mean = odsl_yearly_fields.mean(dim='year')
+    odsl_yearly_anomaly = odsl_yearly_fields - temporal_mean
+    
+    print(f"Yearly ODSL Anomaly range: {odsl_yearly_anomaly.min().item():.2f} to {odsl_yearly_anomaly.max().item():.2f} mm")
+
     #clean up regridders
     try:
         regridder_frederikse.clean_weight_file()
@@ -92,6 +118,7 @@ def calculate_observed_odsl():
     output_ds = xr.Dataset(
         {
             'odsl': odsl_mm_yr,
+            'odsl_yearly': odsl_yearly_anomaly,
             'msl': trend_sla_alt_mm_yr,
             'geoid': trend_asl_fr_regridded_mm_yr,
             'gia': gia_regridded_mm_yr,
@@ -560,87 +587,63 @@ def calculate_lowess_fit():
     print("LOWESS fit calculation complete.")
     return combined_df
 
-@cache_result('NA_modes')
-def analyze_na_modes():
-    """Identifies dominant modes of variability in observed and modeled ODSL using Empirical Orthogonal Function (EOF) analysis."""
+@cache_result('eof_analysis_results')
+def perform_eof_analysis(obs_results, cmip_results, n_modes=5):
+    """Performs EOF analysis on observed data, the multi-model mean, and each individual CMIP model."""
+    
+    print("\nPerforming EOF analysis on all data sources...")
+    
+    sources_to_analyze = {}
+    
+    #observed data
+    sources_to_analyze['observed'] = obs_results['odsl_yearly'].rename({'year': 'time'})
 
-    print("\nIdentifying North Atlantic variability modes with EOF analysis...")
-
-    #load data
-    cmip_results_ds = process_cmip_models()
-    obs_results_ds = calculate_observed_odsl()
-
-    #detrend
-    obs_variability = obs_results_ds['variability']
-    model_full_ts = cmip_results_ds['full_timeseries'].sel(time=slice(START_YEAR, END_YEAR))
+    #CMIP data with detrending to remove long term trend such as climate change (end with residual)
+    model_full_ts = cmip_results['full_timeseries'].sel(time=slice(START_YEAR, END_YEAR))
     model_full_ts['time'] = model_full_ts['time'].astype(int)
     model_detrended = detrend_timeseries(model_full_ts, degree=VARIABILITY_DETREND_DEGREE, dim='time')
     
-    #multi-model mean
-    mmm_detrended = model_detrended.mean(dim='model')
-
-    #cosine latitude weights array
-    coslat = np.cos(np.deg2rad(mmm_detrended['latitude'].values))
-    weights = np.sqrt(coslat)[..., np.newaxis] 
-
-    #EOF
-    solver = Eof(mmm_detrended, weights=weights)
-    n_modes = 5
-    eofs = solver.eofs(neofs=n_modes)
-    pcs = solver.pcs(npcs=n_modes, pcscaling=1)
-    variance_fractions = solver.varianceFraction(neigs=n_modes)
-
-    #correlate PCs with modes
-    nao_ds = load_nao_index()
-    amo_ds = load_amo_index()
-    nao_ts = nao_ds['nao_index'] if nao_ds is not None else None
-    amo_ts = amo_ds['amo_index'] if amo_ds is not None else None
-
-    correlations = {'nao': [], 'amo': []}
+    #multimodel mean
+    sources_to_analyze['mmm'] = model_detrended.mean(dim='model')
     
-    for i in range(n_modes):
-        pc = pcs.sel(mode=i)
+    #individual models
+    for model_name in model_detrended.model.values:
+        sources_to_analyze[model_name] = model_detrended.sel(model=model_name)
+
+    #run EOF
+    all_eof_results = {}
+    for name, data_array in sources_to_analyze.items():
+        print(f"Analyzing source: {name}...")
+        try:
+            eof_result_ds = calculate_single_eof(data_array, n_modes)
+            if eof_result_ds is not None:
+                all_eof_results[name] = eof_result_ds
+        except Exception as e:
+            print(f"Could not perform EOF analysis for {name}: {e}")
+            
+    print("Completed EOF analysis for all sources.")
+
+    return all_eof_results
+
+def correlate_with_indices(all_eof_results):
+    """Correlates the PCs from each EOF analysis result with climate indices."""
+
+    print("\nCorrelating PCs with climate indices for all sources...")
+
+    climate_indices = load_climate_indices_dict()
+    all_correlation_results = {}
+    
+    for name, eof_result_ds in all_eof_results.items():
+        print(f"Correlating for source: {name}...")
+        pcs = eof_result_ds['pcs']
+        correlations = calculate_pc_index_correlations(pcs, climate_indices)
+        all_correlation_results[name] = correlations
         
-        #NAO
-        if nao_ts is not None:
-            pc_aligned, nao_aligned = xr.align(pc, nao_ts, join='inner')
-
-            if pc_aligned.size > 0:
-                corr_val = xr.corr(pc_aligned, nao_aligned, dim='time').values.item()
-                correlations['nao'].append(corr_val)
-            else:
-                correlations['nao'].append(np.nan)
-
-        #AMO
-        if amo_ts is not None:
-            pc_aligned, amo_aligned = xr.align(pc, amo_ts, join='inner')
-
-            if pc_aligned.size > 0:
-                corr_val = xr.corr(pc_aligned, amo_aligned, dim='time').values.item()
-                correlations['amo'].append(corr_val)
-            else:
-                correlations['amo'].append(np.nan)
-
-    #lists to xarray DataArray
-    nao_corr_da = xr.DataArray(correlations['nao'], coords={'mode': np.arange(n_modes)}, dims=['mode'])
-    amo_corr_da = xr.DataArray(correlations['amo'], coords={'mode': np.arange(n_modes)}, dims=['mode'])
-
-    print("Correlations with NAO Index (PC1, PC2, PC3, PC4, PC5):", np.round(correlations['nao'], 2))
-    print("Correlations with AMO Index (PC1, PC2, PC3, PC4, PC5):", np.round(correlations['amo'], 2))
-
-    #output
-    output_ds = xr.Dataset({
-        'eofs': eofs,
-        'pcs': pcs,
-        'variance_fractions': variance_fractions,
-        'nao_index': nao_ts,
-        'amo_index': amo_ts,
-        'nao_corr': nao_corr_da, 
-        'amo_corr': amo_corr_da
-    })
-    output_ds.attrs['description'] = f"EOF analysis results for {n_modes} modes of ODSL variability."
-
-    return output_ds
+        #print results
+        for index_name, corr_da in correlations.items():
+            print(f"Correlations with {index_name.upper()}: {np.round(corr_da.values, 2)}")
+            
+    return all_correlation_results
 
 def main():
     """Run complete analysis."""
@@ -671,13 +674,14 @@ def main():
     lowess_results = calculate_lowess_fit()
     print("Completed LOWESS fit calculation")
 
-    na_modes_results = analyze_na_modes()
-    print("Completed North Atlantic modes analysis.")
+    eof_results = perform_eof_analysis(obs_results, cmip_results, n_modes=5)
+    correlation_results = correlate_with_indices(eof_results)
+    print("Completed EOF analysis.")
 
     print("\nAll calculations complete. Generating figures...")
 
     #figures
-    create_all_figures(lowess_results_df=lowess_results, obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, fig_dir=fig_dir)
+    create_all_figures(lowess_results_df=lowess_results, obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, eof_results=eof_results, correlation_results=correlation_results, fig_dir=fig_dir)
     print("All figures generated!")
 
 if __name__ == "__main__":

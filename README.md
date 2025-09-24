@@ -17,6 +17,9 @@ python odsl_analysis.py
 ### Force recompute
 
 Edit config.py: FORCE_RECOMPUTE = True
+
+then run
+
 python odsl_analysis.py
 
 ### Clear cache
@@ -106,7 +109,7 @@ ODSL/
 ## Cache Size
 
 Total cache size: ~5-10 GB
-First run: 20-30 minutes
+First run: 20-45 minutes
 Cached runs: <1 minute
 
 ## License
@@ -152,7 +155,7 @@ If you use this code in your research, please cite:
 
 ## Data References
 
-1. **Richter, K., Riva, R. E., & Drange, H. (2017)**. Impact of self-attraction and loading effects induced by shelf mass loading on projected regional sea level rise. *Geophysical Research Letters*, 44(3), 1466-1475.
+1. **Richter, K., Øie Nilsen, J. E., Raj, R. P., Bethke, I., Johannessen, J. A., Slangen, A. B., & Marzeion, B. (2017)**. Northern North Atlantic sea level in CMIP5 climate models: evaluation of mean state, variability, and trends against altimetric observations. *Journal of Climate*, 30(23), 9383-9398.
 
 2. **Frederikse, T., Landerer, F., Caron, L., et al. (2020)**. The causes of sea-level rise since 1900. *Nature*, 584(7821), 393-397.
 

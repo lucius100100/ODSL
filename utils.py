@@ -1,3 +1,9 @@
+"""
+@author: L.G. van Dijk (l.g.vandijk1@students.uu.nl, luc.van.dijk@knmi.nl, luciusvandijk@gmail.com)
+
+Utility functions.
+"""
+
 import xarray as xr
 import pandas as pd
 import json
@@ -8,6 +14,7 @@ from functools import wraps
 import config
 import os
 import sys
+from eofs.xarray import Eof
 
 def setup_esmf_environment():
     """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported. See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
@@ -233,3 +240,46 @@ def detrend_timeseries(data_array, degree=1, dim='time'):
     
     #return residuals
     return data_array - fit
+
+def calculate_single_eof(data_array, n_modes=5):
+    """Helper function to perform EOF analysis on a single DataArray."""
+
+    if data_array.time.size < n_modes:
+        print(f"Skipping EOF; not enough time steps ({data_array.time.size})")
+        return None
+        
+    coslat = np.cos(np.deg2rad(data_array['latitude'].values))
+    weights = np.sqrt(coslat)[..., np.newaxis]
+    solver = Eof(data_array, weights=weights)
+    
+    eofs = solver.eofs(neofs=n_modes)
+    pcs = solver.pcs(npcs=n_modes, pcscaling=1)
+    variance_fractions = solver.varianceFraction(neigs=n_modes)
+    
+    return xr.Dataset({
+        'eofs': eofs,
+        'pcs': pcs,
+        'variance_fractions': variance_fractions
+    })
+
+def calculate_pc_index_correlations(pcs, indices_dict):
+    """Helper function to correlate a single set of PCs with indices."""
+
+    correlations = {}
+    
+    for index_name, index_ts in indices_dict.items():
+        if index_ts is None: continue
+        
+        corr_values = []
+        for mode in pcs.mode.values:
+            pc_mode = pcs.sel(mode=mode)
+            pc_aligned, index_aligned = xr.align(pc_mode, index_ts, join='inner')
+            
+            if pc_aligned.size > 1:
+                corr_values.append(xr.corr(pc_aligned, index_aligned, dim='time').item())
+            else:
+                corr_values.append(np.nan)
+        
+        correlations[index_name] = xr.DataArray(corr_values, coords={'mode': pcs.mode.values}, dims=['mode'])
+
+    return correlations

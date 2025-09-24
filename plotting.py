@@ -1,3 +1,9 @@
+"""
+@author: L.G. van Dijk (l.g.vandijk1@students.uu.nl, luc.van.dijk@knmi.nl, luciusvandijk@gmail.com)
+
+Plotting functions for ODSL analysis.
+"""
+
 from utils import calculate_weighted_stats, create_region_mask
 from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG)
 
@@ -13,18 +19,29 @@ import xesmf as xe
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mticker
 import seaborn as sns
+from matplotlib.colors import TwoSlopeNorm
 
-def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_results, scenario_results, fig_dir):
+def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_results, scenario_results, eof_results, correlation_results, fig_dir):
     """Generate all figures for the analysis."""
 
+    #general figure directories
     if not os.path.exists(fig_dir):
         os.makedirs(fig_dir)
 
+    #variable-specific figure directory
     variable_fig_dir = os.path.join(fig_dir, PLOT_VARIABLE)
     if not os.path.exists(variable_fig_dir):
         os.makedirs(variable_fig_dir)
 
-    plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir)
+    #EOF-specific figure directory
+    eof_fig_dir = os.path.join(variable_fig_dir, "eof_analysis")
+    if not os.path.exists(eof_fig_dir):
+        os.makedirs(eof_fig_dir)
+
+    plot_correlation_table(correlation_results, eof_fig_dir)
+    plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=3)
+    plot_scree_and_pcs(eof_results, eof_fig_dir, num_modes_to_plot=3)
+    plot_correlation_biplot(eof_results, correlation_results, eof_fig_dir, mode_x=0, mode_y=1)
     plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, variable_fig_dir)
     plot_lowess_fit(lowess_results_df, variable_fig_dir)
     plot_scenario_comparison(scenario_results, variable_fig_dir)
@@ -40,8 +57,9 @@ def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_res
     plot_cmip_multimodel_mean(cmip_results, variable_fig_dir)
     plot_observed_vs_modeled(cmip_results, sliding_results, variable_fig_dir)
     plot_sliding_window_timeseries(sliding_results, variable_fig_dir)
-    plot_best_matching_periods(sliding_results, variable_fig_dir)
-    #plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir)
+    plot_best_and_worst_matching_periods(sliding_results, variable_fig_dir)
+    plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir)
+    #plot_yearly_odsl_anomaly(obs_results, fig_dir)
 
 def add_map_features(ax, extent, is_left=False, is_bottom=False):
     """Add standard map features to axis."""
@@ -345,8 +363,8 @@ def plot_sliding_window_timeseries(sliding_results, fig_dir):
     plt.savefig(os.path.join(fig_dir, f'sliding_window_timeseries_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
-def plot_best_matching_periods(sliding_results, fig_dir):
-    """Calculates and plots the best matching observed window periods."""
+def plot_best_and_worst_matching_periods(sliding_results, fig_dir):
+    """Calculates and plots the best and worst matching observed window periods."""
 
     cfg = PLOT_CONFIG[PLOT_VARIABLE]
     window_size = END_YEAR - START_YEAR + 1
@@ -363,43 +381,71 @@ def plot_best_matching_periods(sliding_results, fig_dir):
     model_names = sliding_results.model.values
     
     best_pcc_windows, best_pcc_values = [], []
+    worst_pcc_windows, worst_pcc_values = [], []
     best_rmse_windows, best_rmse_values = [], []
+    worst_rmse_windows, worst_rmse_values = [], []
 
     for model_name in model_names:
         pcc_model = pcc_data.sel(model=model_name)
         rmse_model = rmse_data.sel(model=model_name)
         
         try:
+            #best PCC
             best_pcc_year = pcc_model.idxmax('window_start_year').item()
             best_pcc_windows.append((best_pcc_year, best_pcc_year + window_size - 1))
             best_pcc_values.append(pcc_model.max('window_start_year').item())
+
+            #worst PCC
+            worst_pcc_year = pcc_model.idxmin('window_start_year').item()
+            worst_pcc_windows.append((worst_pcc_year, worst_pcc_year + window_size - 1))
+            worst_pcc_values.append(pcc_model.min('window_start_year').item())
         except ValueError: 
             best_pcc_windows.append((np.nan, np.nan)); best_pcc_values.append(np.nan)
 
         try:
+            #best RMSE
             best_rmse_year = rmse_model.idxmin('window_start_year').item()
             best_rmse_windows.append((best_rmse_year, best_rmse_year + window_size - 1))
             best_rmse_values.append(rmse_model.min('window_start_year').item())
+
+            #worst RMSE
+            worst_rmse_year = rmse_model.idxmax('window_start_year').item()
+            worst_rmse_windows.append((worst_rmse_year, worst_rmse_year + window_size - 1))
+            worst_rmse_values.append(rmse_model.max('window_start_year').item())
         except ValueError: 
             best_rmse_windows.append((np.nan, np.nan)); best_rmse_values.append(np.nan)
 
     pcc_mean_ts = pcc_data.mean(dim='model')
     rmse_mean_ts = rmse_data.mean(dim='model')
 
+    #best PCC ensemble
     ens_best_pcc_year = pcc_mean_ts.idxmax('window_start_year').item()
     ens_best_pcc_window = (ens_best_pcc_year, ens_best_pcc_year + window_size - 1)
     ens_max_pcc_value = pcc_mean_ts.max('window_start_year').item()
+
+    #worst PCC ensemble
+    ens_worst_pcc_year = pcc_mean_ts.idxmin('window_start_year').item()
+    ens_worst_pcc_window = (ens_worst_pcc_year, ens_worst_pcc_year + window_size - 1)
+    ens_min_pcc_value = pcc_mean_ts.min('window_start_year').item()
     
+    #best RMSE ensemble
     ens_best_rmse_year = rmse_mean_ts.idxmin('window_start_year').item()
     ens_best_rmse_window = (ens_best_rmse_year, ens_best_rmse_year + window_size - 1)
     ens_min_rmse_value = rmse_mean_ts.min('window_start_year').item()
+
+    #worst RMSE ensemble
+    ens_worst_rmse_year = rmse_mean_ts.idxmax('window_start_year').item()
+    ens_worst_rmse_window = (ens_worst_rmse_year, ens_worst_rmse_year + window_size - 1)
+    ens_max_rmse_value = rmse_mean_ts.max('window_start_year').item()
 
     #plotting
     fig, ax = plt.subplots(figsize=(12, 8))
 
     observed_period = (START_YEAR, END_YEAR)
     observed_center = (observed_period[0] + observed_period[1]) / 2
-    combined_data = list(zip(model_names, best_pcc_windows, best_rmse_windows, best_pcc_values, best_rmse_values))
+
+    #combined list
+    combined_data = list(zip(model_names, best_pcc_windows, best_rmse_windows, best_pcc_values, best_rmse_values, worst_pcc_windows, worst_rmse_windows, worst_pcc_values, worst_rmse_values))
 
     def sort_key(item):
         rmse_window = item[2]
@@ -408,36 +454,76 @@ def plot_best_matching_periods(sliding_results, fig_dir):
     
     sorted_combined_data = sorted(combined_data, key=sort_key, reverse=True)
     
-    ensemble_entry = ('Ensemble mean', ens_best_pcc_window, ens_best_rmse_window, ens_max_pcc_value, ens_min_rmse_value)
+    ensemble_entry = ('Ensemble mean', ens_best_pcc_window, ens_best_rmse_window, ens_max_pcc_value, ens_min_rmse_value, ens_worst_pcc_window, ens_worst_rmse_window, ens_min_pcc_value, ens_max_rmse_value)
     sorted_combined_data.append(ensemble_entry)
 
     if not sorted_combined_data:
         plt.show(); return
 
-    sorted_model_list, sorted_pcc_windows, sorted_rmse_windows, sorted_pcc_values, sorted_rmse_values = zip(*sorted_combined_data)
+    sorted_model_list, sorted_best_pcc_windows, sorted_best_rmse_windows, sorted_best_pcc_values, sorted_best_rmse_values, sorted_worst_pcc_windows, sorted_worst_rmse_windows, sorted_worst_pcc_values, sorted_worst_rmse_values = zip(*sorted_combined_data)
 
     y_positions = np.arange(len(sorted_model_list))
     bar_height = 0.4
 
-    for i, (pcc_window, rmse_window, pcc_value, rmse_value) in enumerate(zip(sorted_pcc_windows, sorted_rmse_windows, sorted_pcc_values, sorted_rmse_values)):
-        if not np.isnan(rmse_window[0]):
-            ax.barh(y_positions[i] - bar_height/2, rmse_window[1] - rmse_window[0], left=rmse_window[0], height=bar_height, color='black', alpha=0.7, label='Best RMSE' if i == 0 else "")
-            bar_center = (rmse_window[0] + rmse_window[1]) / 2
-            ax.text(bar_center, y_positions[i] - bar_height/2, f'{rmse_value:.2f}', ha='center', va='center', color='white', fontweight='bold', fontsize=9)
+    for i in range(len(sorted_model_list)):
+        
+        #PCC bars
+        pcc_y_pos = y_positions[i] + bar_height / 2
+        best_pcc_win = sorted_best_pcc_windows[i]
+        worst_pcc_win = sorted_worst_pcc_windows[i]
+        
+        #best PCC
+        if not np.isnan(best_pcc_win[0]):
+            value = sorted_best_pcc_values[i]
+            ax.barh(pcc_y_pos, best_pcc_win[1] - best_pcc_win[0], left=best_pcc_win[0], height=bar_height, color='red', alpha=0.8, label='Best PCC' if i == 0 else "", edgecolor='red', linewidth=1)
+            ax.text((best_pcc_win[0] + best_pcc_win[1]) / 2, pcc_y_pos, f'{value:.2f}', ha='center', va='center', color='white', fontweight='bold', fontsize=7)
 
-        if not np.isnan(pcc_window[0]):
-            ax.barh(y_positions[i] + bar_height/2, pcc_window[1] - pcc_window[0], left=pcc_window[0], height=bar_height, color='red', alpha=0.7, label='Best PCC' if i == 0 else "")
-            bar_center = (pcc_window[0] + pcc_window[1]) / 2
-            ax.text(bar_center, y_positions[i] + bar_height/2, f'{pcc_value:.2f}', ha='center', va='center', color='white', fontweight='bold', fontsize=9)
+        #worst PCC
+        if not np.isnan(worst_pcc_win[0]):
+            value = sorted_worst_pcc_values[i]
+            ax.barh(pcc_y_pos, worst_pcc_win[1] - worst_pcc_win[0], left=worst_pcc_win[0], height=bar_height, color='red', alpha=0.2, label='Worst PCC' if i == 0 else "", edgecolor='red', linestyle='--', linewidth=1)
+            ax.text((worst_pcc_win[0] + worst_pcc_win[1]) / 2, pcc_y_pos, f'{value:.2f}', ha='center', va='center', color='black', fontsize=7)
 
-    ax.axvspan(observed_period[0], observed_period[1], alpha=0.2, color='red', label='Observation period')
+        #line between best and worst PCC window
+        if not np.isnan(best_pcc_win[0]) and not np.isnan(worst_pcc_win[0]):
+            left_end = min(best_pcc_win[1], worst_pcc_win[1])
+            right_start = max(best_pcc_win[0], worst_pcc_win[0])
+            if left_end < right_start:
+                ax.plot([left_end, right_start], [pcc_y_pos, pcc_y_pos], color='red', linestyle='-', linewidth=1.5)
+            
+        #RMSE bars
+        rmse_y_pos = y_positions[i] - bar_height / 2
+        best_rmse_win = sorted_best_rmse_windows[i]
+        worst_rmse_win = sorted_worst_rmse_windows[i]
+        
+        #best RMSE
+        if not np.isnan(best_rmse_win[0]):
+            value = sorted_best_rmse_values[i]
+            ax.barh(rmse_y_pos, best_rmse_win[1] - best_rmse_win[0], left=best_rmse_win[0], height=bar_height, color='black', alpha=0.8, label='Best RMSE' if i == 0 else "", edgecolor='black', linewidth=1)
+            ax.text((best_rmse_win[0] + best_rmse_win[1]) / 2, rmse_y_pos, f'{value:.2f}', ha='center', va='center', color='white', fontweight='bold', fontsize=7)
+
+        #worst RMSE
+        if not np.isnan(worst_rmse_win[0]):
+            value = sorted_worst_rmse_values[i]
+            ax.barh(rmse_y_pos, worst_rmse_win[1] - worst_rmse_win[0], left=worst_rmse_win[0], height=bar_height, color='black', alpha=0.2, label='Worst RMSE' if i == 0 else "", edgecolor='black', linestyle='--', linewidth=1)
+            ax.text((worst_rmse_win[0] + worst_rmse_win[1]) / 2, rmse_y_pos, f'{value:.2f}', ha='center', va='center', color='black', fontsize=7)
+
+        #line between best and worst RMSE window
+        if not np.isnan(best_rmse_win[0]) and not np.isnan(worst_rmse_win[0]):
+            left_end = min(best_rmse_win[1], worst_rmse_win[1])
+            right_start = max(best_rmse_win[0], worst_rmse_win[0])
+            if left_end < right_start:
+                ax.plot([left_end, right_start], [rmse_y_pos, rmse_y_pos], color='black', linestyle='-', linewidth=1.5)
+
+    ax.axvline(observed_period[0], color='green', linestyle='--', linewidth=1.5, label='Observation period')
+    ax.axvline(observed_period[1], color='green', linestyle='--', linewidth=1.5)
     ax.set_yticks(y_positions)
     ax.set_yticklabels(sorted_model_list)
     ax.set_ylim(-0.5, len(sorted_model_list) - 0.5)
     ax.set_xlabel('Year', fontsize=12)
 
     #dynamic x-lim
-    all_windows = list(sorted_pcc_windows) + list(sorted_rmse_windows)
+    all_windows = list(sorted_best_pcc_windows) + list(sorted_best_rmse_windows) + list(sorted_worst_pcc_windows) + list(sorted_worst_rmse_windows)
     all_years = [year for window in all_windows if not np.isnan(window[0]) for year in window]
     all_years.extend(observed_period)
     if all_years:
@@ -448,12 +534,12 @@ def plot_best_matching_periods(sliding_results, fig_dir):
     separator_pos = len(model_names) - 0.5
     ax.axhline(y=separator_pos, color='gray', linestyle='--', xmin=-0.12, clip_on=False)
 
-    ax.set_title(f'Best matching {window_size}-year periods by model ({cfg["name"]} vs. observations)', fontsize=14, fontweight='bold')
+    ax.set_title(f'Best and worst matching {window_size}-year periods by model ({cfg["name"]} vs. observations)', fontsize=14, fontweight='bold')
     ax.legend(loc='center left')
-    ax.grid(True, axis='x', linestyle='--', alpha=0.5)
+    ax.grid(True, axis='x', linestyle='--', alpha=0.2)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(fig_dir, f'best_matching_periods_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(fig_dir, f'best_and_worst_matching_periods_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
 def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
@@ -539,25 +625,37 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     #plotting
     model_names = df_sorted.index.tolist()
     x = np.arange(len(model_names))
-    fig, ax = plt.subplots(figsize=(16, 10))
+    fig, ax = plt.subplots(figsize=(14, 14))
     
     mean_rmse_all, min_rmse_all, max_rmse_all, obs_period_rmse = df_sorted['mean_rmse'], df_sorted['min_rmse'], df_sorted['max_rmse'], df_sorted['obs_period_rmse']
     mean_pcc_all, min_pcc_all, max_pcc_all, obs_period_pcc = df_sorted['mean_pcc'], df_sorted['min_pcc'], df_sorted['max_pcc'], df_sorted['obs_period_pcc']
     
+    #y-axes plotting range
     y_min, y_max = 0, 1
-    rmse_min_val, rmse_max_val = 0, np.nanmax(max_rmse_all) * 1.1
+
+    #dynamic range RMSE axis
+    actual_rmse_min, actual_rmse_max = np.nanmin(min_rmse_all), np.nanmax(max_rmse_all)
+    rmse_data_range = actual_rmse_max - actual_rmse_min
+    padding = rmse_data_range * 0.05 if rmse_data_range > 0 else 0.1
+    rmse_min_val = max(0, actual_rmse_min - padding)
+    rmse_max_val = actual_rmse_max + padding
     rmse_range = rmse_max_val - rmse_min_val
     rmse_scale_factor = 0.5 / rmse_range if rmse_range > 0 else 0
 
-    pcc_min_val, pcc_max_val = np.nanmin(min_pcc_all) - 0.1, np.nanmax(max_pcc_all) + 0.1
+    #dynamic range PCC axis
+    actual_pcc_min, actual_pcc_max = np.nanmin(min_pcc_all), np.nanmax(max_pcc_all)
+    pcc_data_range = actual_pcc_max - actual_pcc_min
+    padding = pcc_data_range * 0.05 if pcc_data_range > 0 else 0.1
+    pcc_min_val = actual_pcc_min - padding
+    pcc_max_val = actual_pcc_max + padding
     pcc_range = pcc_max_val - pcc_min_val
     pcc_scale_factor = 0.5 / pcc_range if pcc_range > 0 else 0
     pcc_offset = 0.5
 
-    mean_rmse_scaled = mean_rmse_all * rmse_scale_factor
-    min_rmse_scaled = min_rmse_all * rmse_scale_factor
-    max_rmse_scaled = max_rmse_all * rmse_scale_factor
-    obs_rmse_scaled = obs_period_rmse * rmse_scale_factor
+    mean_rmse_scaled = (mean_rmse_all - rmse_min_val) * rmse_scale_factor
+    min_rmse_scaled = (min_rmse_all - rmse_min_val) * rmse_scale_factor
+    max_rmse_scaled = (max_rmse_all - rmse_min_val) * rmse_scale_factor
+    obs_rmse_scaled = (obs_period_rmse - rmse_min_val) * rmse_scale_factor
     
     mean_pcc_scaled = (mean_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
     min_pcc_scaled = (min_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
@@ -567,13 +665,13 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     #violin
     df_rmse_long = rmse_ts.to_dataframe(name='rmse').reset_index()
     df_pcc_long = pcc_ts.to_dataframe(name='pcc').reset_index()
-    df_rmse_long['rmse_scaled'] = df_rmse_long['rmse'] * rmse_scale_factor
+    df_rmse_long['rmse_scaled'] = (df_rmse_long['rmse'] - rmse_min_val) * rmse_scale_factor
     df_pcc_long['pcc_scaled'] = (df_pcc_long['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
     model_order = df_sorted.index.tolist()
 
     #violin plots
-    sns.violinplot(data=df_rmse_long, x='model', y='rmse_scaled', order=model_order, ax=ax, color='grey', alpha=0.4, inner=None, saturation=0.7, zorder=1, cut=0)
-    sns.violinplot(data=df_pcc_long, x='model', y='pcc_scaled', order=model_order, ax=ax, color='red', alpha=0.4, inner=None, saturation=0.7, zorder=1, cut=0)
+    sns.violinplot(data=df_rmse_long, x='model', y='rmse_scaled', order=model_order, ax=ax, color='grey', alpha=0.4, inner=None, saturation=0.7, zorder=1, cut=0, width=1.0)
+    sns.violinplot(data=df_pcc_long, x='model', y='pcc_scaled', order=model_order, ax=ax, color='red', alpha=0.4, inner=None, saturation=0.7, zorder=1, cut=0, width=1.0)
 
     #mean RMSE
     mean_rmse_line_plotted = False
@@ -585,7 +683,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
 
     #range RMSE
     ax.errorbar(x, mean_rmse_scaled, yerr=[mean_rmse_scaled - min_rmse_scaled, max_rmse_scaled - mean_rmse_scaled], fmt='none', color='black', capsize=6, capthick=1.5, label='RMSE range (all sliding windows)')
-    ax.scatter(x, obs_rmse_scaled, color='black', s=80, zorder=5, label='RMSE over observed period')
+    ax.scatter(x, obs_rmse_scaled, color='black', s=60, zorder=5, label='RMSE over observed period')
     
     #mean PCC
     mean_line_plotted = False
@@ -597,24 +695,26 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     
     #range PCC
     ax.errorbar(x, mean_pcc_scaled, yerr=[mean_pcc_scaled - min_pcc_scaled, max_pcc_scaled - mean_pcc_scaled], fmt='none', color='red', capsize=6, capthick=1.5, label='PCC range (all sliding windows)')
-    ax.scatter(x, obs_pcc_scaled, color='red', s=80, zorder=5, label='PCC over observed period')
+    ax.scatter(x, obs_pcc_scaled, color='red', s=60, zorder=5, label='PCC over observed period')
 
-    ax.set_xlabel('Model', fontsize=12)
     ax.set_ylim(y_min, y_max)
     ax2 = ax.twinx()
     ax2.set_ylim(y_min, y_max)
     
-    locator = mticker.MaxNLocator(nbins=5, prune='both')
-    rmse_tick_values = locator.tick_values(rmse_min_val, rmse_max_val)
-    ax.set_yticks(rmse_tick_values * rmse_scale_factor)
-    ax.set_yticklabels([f'{v:.1f}' for v in rmse_tick_values])
+    #y axes tickers
+    num_ticks = 5
+
+    scaled_rmse_ticks = np.linspace(0, 0.5, num_ticks)
+    original_rmse_labels = scaled_rmse_ticks / rmse_scale_factor + rmse_min_val
+    ax.set_yticks(scaled_rmse_ticks)
+    ax.set_yticklabels([f'{val:.1f}' for val in original_rmse_labels])
     ax.set_ylabel(f'RMSE ({unit})', fontsize=12, color='black', y=0.25)
     ax.tick_params(axis='y', labelcolor='black')
-    
-    locator = mticker.MaxNLocator(nbins=5, prune='both')
-    pcc_tick_values = locator.tick_values(pcc_min_val, pcc_max_val)
-    ax2.set_yticks((pcc_tick_values - pcc_min_val) * pcc_scale_factor + pcc_offset)
-    ax2.set_yticklabels([f'{v:.1f}' for v in pcc_tick_values])
+
+    scaled_pcc_ticks = np.linspace(0.5, 1.0, num_ticks)
+    original_pcc_labels = (scaled_pcc_ticks - pcc_offset) / pcc_scale_factor + pcc_min_val
+    ax2.set_yticks(scaled_pcc_ticks)
+    ax2.set_yticklabels([f'{val:.1f}' for val in original_pcc_labels])
     ax2.set_ylabel('PCC', fontsize=12, color='red', y=0.75)
     ax2.tick_params(axis='y', labelcolor='red')
 
@@ -624,18 +724,20 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     
     ax.set_xticks(x)
     ax.set_xticklabels(model_names, rotation=90, ha='center', va='top', fontsize=10)
-    ax.set_xlabel('Models')
     ax.set_xlim(-0.5, len(model_names) - 0.5)
     ax.set_title(f'Model-observation ODSL comparison ({cfg["name"]})\nMean statistics over all {window_size}-yr sliding windows', fontsize=14, pad=20, fontweight='bold')
     
-    for tick in ax.get_yticks(): ax.axhline(y=tick, color='gray', linestyle='-', alpha=0.2, linewidth=0.5, zorder=0)
-    for tick in ax2.get_yticks(): ax.axhline(y=tick, color='gray', linestyle='-', alpha=0.2, linewidth=0.5, zorder=0)
+    #grid lines
+    for tick in ax.get_yticks():
+        ax.axhline(y=tick, color='gray', linestyle='-', alpha=0.3, linewidth=0.7, zorder=0)
+    for tick in ax2.get_yticks():
+        ax.axhline(y=tick, color='grey', linestyle='-', alpha=0.3, linewidth=0.7, zorder=0)
 
     #ordered legend
     handles, labels = ax.get_legend_handles_labels()
 
-    rmse_violin_patch = mpatches.Patch(color='grey', alpha=0.5, label='RMSE distribution (all sliding windows)')
-    pcc_violin_patch = mpatches.Patch(color='red', alpha=0.5, label='PCC distribution (all sliding windows)')
+    rmse_violin_patch = mpatches.Patch(color='grey', alpha=0.6, label='RMSE distribution (all sliding windows)')
+    pcc_violin_patch = mpatches.Patch(color='red', alpha=0.6, label='PCC distribution (all sliding windows)')
     handles.extend([rmse_violin_patch, pcc_violin_patch])
     labels.extend(['RMSE distribution (all sliding windows)', 'PCC distribution (all sliding windows)'])
 
@@ -653,7 +755,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     label_handle_map = dict(zip(labels, handles))
     reordered_handles = [label_handle_map[label] for label in desired_order if label in label_handle_map]
     reordered_labels = [label for label in desired_order if label in label_handle_map]
-    ax.legend(reordered_handles, reordered_labels, loc='upper left', bbox_to_anchor=(0, 0.5), fontsize=10)
+    ax.legend(reordered_handles, reordered_labels, loc='upper left', bbox_to_anchor=(0, 0.5), fontsize=12)
 
     plt.tight_layout()
     plt.savefig(os.path.join(fig_dir, f'model_comparison_summary_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
@@ -904,3 +1006,237 @@ def plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_result
     filename = os.path.join(fig_dir, f'lowess_residuals_spatial_{cfg["name"]}.png')
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.show()
+
+def plot_yearly_odsl_anomaly(obs_results, fig_dir):
+    """The yearly observed ODSL anomaly for each year in the analysis period."""
+
+    print("Generating yearly observed ODSL anomaly figure...")
+
+    odsl_anomaly = obs_results['odsl_yearly']
+    
+    #symmetric color range for all subplots
+    vmax = float(odsl_anomaly.quantile(0.99))
+    vmin = -vmax
+
+    #dynamic subplot layout
+    num_years = len(odsl_anomaly.year)
+    ncols = 4
+    nrows = (num_years + ncols - 1) // ncols
+
+    #plotting
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 4, nrows * 3.2), subplot_kw={'projection': ccrs.Robinson(central_longitude=-40)})
+
+    #flatten
+    axes = axes.flatten()
+
+    #loop
+    for i, year in enumerate(odsl_anomaly.year.values):
+        ax = axes[i]
+        data_for_year = odsl_anomaly.sel(year=year)
+        
+        #plot data
+        im = ax.pcolormesh(data_for_year.longitude, data_for_year.latitude, data_for_year, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=vmin, vmax=vmax)
+        
+        ax.coastlines(linewidth=0.5)
+        ax.set_global()
+        ax.set_title(f'Year: {year}')
+
+    #hide unused subplots
+    for j in range(num_years, len(axes)):
+        axes[j].set_visible(False)
+
+    #layout
+    fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.15, hspace=0.15, wspace=0.05)
+    cbar_ax = fig.add_axes([0.2, 0.08, 0.6, 0.015]) 
+    cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', extend='both')
+    cbar_label = (f'Observed ODSL Anomaly (mm)\n' f'(Color range from 99th percentile: {vmin:.1f} to {vmax:.1f} mm)')
+    cbar.set_label(cbar_label, fontsize=11)
+
+    fig.suptitle('Yearly observed ODSL anomaly', fontsize=16, fontweight='bold', y=0.97)
+    
+    output_path = os.path.join(fig_dir, 'observed_odsl_yearly_anomaly.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Figure saved to {output_path}")
+    plt.show()
+
+def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
+    """Visualizes the spatial patterns of the EOFs for each specified data source."""
+
+    sources_to_plot = ['observed', 'mmm']
+
+    for source_name in sources_to_plot:
+        if source_name not in all_eof_results:
+            print(f"  Skipping spatial EOF plot for '{source_name}'; results not found.")
+            continue
+
+        print(f"  Generating spatial EOF plot for: {source_name}")
+        eof_results = all_eof_results[source_name]
+        eofs = eof_results['eofs']
+        variance = eof_results['variance_fractions']
+
+        #plot
+        fig, axes = plt.subplots(
+            nrows=num_modes_to_plot,
+            figsize=(8, 4 * num_modes_to_plot),
+            subplot_kw={'projection': ccrs.Robinson(central_longitude=-30)}
+        )
+
+        if num_modes_to_plot == 1: axes = [axes]
+
+        for i in range(num_modes_to_plot):
+            ax = axes[i]
+            mode_data = eofs.sel(mode=i)
+            mode_data.plot(ax=ax, transform=ccrs.PlateCarree(), cmap='coolwarm',
+                           cbar_kwargs={'label': 'Amplitude'})
+            ax.coastlines()
+            ax.set_title(f"EOF Mode {i+1} ({variance.sel(mode=i).item()*100:.1f}% variance)")
+
+        fig.suptitle(f'Spatial EOF Patterns for {source_name.upper()}', fontsize=16, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        
+        output_path = os.path.join(fig_dir, f'spatial_eofs_{source_name}.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
+    """Creates a scree plot and PC time series plot for each specified data source."""
+
+    sources_to_plot = ['observed', 'mmm']
+
+    for source_name in sources_to_plot:
+        if source_name not in all_eof_results:
+            print(f"  Skipping scree/PC plot for '{source_name}'; results not found.")
+            continue
+
+        print(f"  Generating scree and PC plot for: {source_name}")
+        eof_results = all_eof_results[source_name]
+        variance = eof_results['variance_fractions']
+        pcs = eof_results['pcs']
+
+        #plot
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [1, 2]})
+
+        ax1.bar(variance.mode.values + 1, variance.values * 100)
+        ax1.set_title('Scree Plot: Variance Explained by Each Mode')
+        ax1.set_xlabel('Mode Number')
+        ax1.set_ylabel('Variance Explained (%)')
+        ax1.set_xticks(variance.mode.values + 1)
+        ax1.grid(axis='y', linestyle='--', alpha=0.7)
+
+        for i in range(num_modes_to_plot):
+            ax2.plot(pcs.time.values, pcs.sel(mode=i), label=f'PC {i+1}')
+            
+        ax2.set_title('Principal Component (PC) Time Series')
+        ax2.set_xlabel('Year')
+        ax2.set_ylabel('Standardized Amplitude')
+        ax2.legend()
+        ax2.grid(True, linestyle='--', alpha=0.7)
+        
+        fig.suptitle(f'EOF Analysis for {source_name.upper()}', fontsize=16, fontweight='bold')
+        plt.tight_layout()
+        
+        output_path = os.path.join(fig_dir, f'scree_plot_and_pcs_{source_name}.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, mode_x=0, mode_y=1):
+    """Creates a biplot of PCs and index correlations for each specified data source."""
+
+    sources_to_plot = ['observed', 'mmm']
+
+    for source_name in sources_to_plot:
+        if source_name not in all_eof_results or source_name not in all_correlation_results:
+            print(f"  Skipping biplot for '{source_name}'; results not found.")
+            continue
+            
+        print(f"  Generating correlation biplot for: {source_name}")
+        eof_results = all_eof_results[source_name]
+        correlation_results = all_correlation_results[source_name]
+        
+        pc_x = eof_results['pcs'].sel(mode=mode_x)
+        pc_y = eof_results['pcs'].sel(mode=mode_y)
+        
+        #plot
+        fig, ax = plt.subplots(figsize=(8, 8))
+        
+        ax.scatter(pc_x, pc_y, alpha=0.5, label='Yearly PC values')
+
+        for index_name, correlations in correlation_results.items():
+            corr_x = correlations.sel(mode=mode_x).item()
+            corr_y = correlations.sel(mode=mode_y).item()
+            
+            ax.arrow(0, 0, corr_x, corr_y, head_width=0.05, head_length=0.05, fc='red', ec='red', length_includes_head=True, zorder=10)
+            ax.text(corr_x * 1.15, corr_y * 1.15, index_name.upper(), color='red', fontweight='bold', ha='center', va='center')
+
+        ax.axhline(0, color='grey', linestyle='--'); ax.axvline(0, color='grey', linestyle='--')
+        ax.set_xlabel(f'PC {mode_x + 1} Amplitude')
+        ax.set_ylabel(f'PC {mode_y + 1} Amplitude')
+        ax.set_title(f'Biplot for {source_name.upper()} (PC{mode_x+1} vs. PC{mode_y+1})')
+        ax.grid(True)
+        ax.legend()
+        
+        output_path = os.path.join(fig_dir, f'correlation_biplot_{source_name}_pc{mode_x+1}_vs_pc{mode_y+1}.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+def plot_correlation_table(all_correlation_results, fig_dir):
+    """Generates and saves a figure containing a table of PC-index correlations."""
+
+    print("Generating EOF correlation overview table figure...")
+
+    table_data = []
+
+    source_order = [s for s in ['observed', 'mmm'] if s in all_correlation_results]
+    index_order = sorted(list(all_correlation_results.get(source_order[0], {}).keys()))
+    
+    for source_name in source_order:
+        corr_dict = all_correlation_results[source_name]
+        for index_name in index_order:
+            if index_name not in corr_dict: continue
+                
+            corr_da = corr_dict[index_name]
+            row_data = {'Source': source_name.upper(), 'Index': index_name.upper()}
+            for mode in corr_da.mode.values:
+                val = corr_da.sel(mode=mode).item()
+                row_data[f'Mode {mode+1}'] = f"{val:.2f}" if pd.notna(val) else "N/A"
+            table_data.append(row_data)
+
+    if not table_data:
+        print("  No correlation data to plot.")
+        return
+        
+    df = pd.DataFrame(table_data)
+
+    #plot
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.axis('off')
+
+    #table
+    table = ax.table(cellText=df.values, colLabels=df.columns, loc='center', cellLoc='center', colColours=['#f2f2f2'] * len(df.columns))
+    
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.2, 1.5)
+
+    #style
+    norm = TwoSlopeNorm(vmin=-1.0, vcenter=0, vmax=1.0)
+    cmap = plt.get_cmap('coolwarm')
+    
+    #apply colors
+    for i in range(len(df)):
+        for j in range(len(df.columns)):
+            cell = table[i + 1, j]
+            if df.columns[j] not in ['Source', 'Index']:
+                try:
+                    val = float(df.iloc[i, j])
+                    cell.set_facecolor(cmap(norm(val)))
+                    if abs(val) > 0.5:
+                        cell.get_text().set_color('white')
+                except (ValueError, TypeError):
+                    cell.set_facecolor('white')
+
+    fig.suptitle('PC correlations with climate indices', fontsize=16, fontweight='bold')
+    
+    output_path = os.path.join(fig_dir, 'eof_correlation_table.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)

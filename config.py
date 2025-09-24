@@ -1,3 +1,9 @@
+"""
+@author: L.G. van Dijk (l.g.vandijk1@students.uu.nl, luc.van.dijk@knmi.nl, luciusvandijk@gmail.com)
+
+Configuration file for ODSL analysis and plotting.
+"""
+
 #parameters
 CMIP_VERSION               = 'CMIP6'           #CMIP version to be used: 'CMIP5' or 'CMIP6'
 START_YEAR                 = 1993              #observed period
