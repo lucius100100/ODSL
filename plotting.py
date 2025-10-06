@@ -19,9 +19,9 @@ import xesmf as xe
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mticker
 import seaborn as sns
-from matplotlib.colors import TwoSlopeNorm
+from matplotlib.colors import Normalize, TwoSlopeNorm
 
-def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_results, scenario_results, eof_results, correlation_results, fig_dir):
+def create_all_figures(obs_results, cmip_results, sliding_results, scenario_results, eof_results, correlation_results, fig_dir):
     """Generate all figures for the analysis."""
 
     #general figure directories
@@ -34,16 +34,17 @@ def create_all_figures(lowess_results_df, obs_results, cmip_results, sliding_res
         os.makedirs(variable_fig_dir)
 
     #EOF-specific figure directory
-    eof_fig_dir = os.path.join(variable_fig_dir, "eof_analysis")
+    eof_fig_dir = os.path.join(fig_dir, "eof_analysis")
     if not os.path.exists(eof_fig_dir):
         os.makedirs(eof_fig_dir)
 
-    plot_correlation_table(correlation_results, eof_fig_dir)
+    plot_eof_summary_table(eof_results, correlation_results, eof_fig_dir)
+    export_eof_results_to_csv(eof_results, correlation_results, eof_fig_dir)
     plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=3)
     plot_scree_and_pcs(eof_results, eof_fig_dir, num_modes_to_plot=3)
     plot_correlation_biplot(eof_results, correlation_results, eof_fig_dir, mode_x=0, mode_y=1)
-    plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, variable_fig_dir)
-    plot_lowess_fit(lowess_results_df, variable_fig_dir)
+    #plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, variable_fig_dir)
+    #plot_lowess_fit(lowess_results_df, variable_fig_dir)
     plot_scenario_comparison(scenario_results, variable_fig_dir)
 
     print(f"\nGenerating figures for {PLOT_VARIABLE.upper()}")
@@ -322,8 +323,7 @@ def plot_sliding_window_timeseries(sliding_results, fig_dir):
 
     #plot 2: PCC
     for i, model_name in enumerate(model_names):
-        ax2.plot(window_centers, pcc.sel(model=model_name), color=colors[i % len(colors)], linestyle=line_styles[i % len(line_styles)],
-                 linewidth=line_widths[i % len(line_widths)], alpha=0.8, label=model_name)
+        ax2.plot(window_centers, pcc.sel(model=model_name), color=colors[i % len(colors)], linestyle=line_styles[i % len(line_styles)], linewidth=line_widths[i % len(line_widths)], alpha=0.8, label=model_name)
         
     ax2.plot(window_centers, pcc_mean, color='black', linewidth=3.5, linestyle='-', label='Ensemble mean', zorder=10, alpha=0.9)
     ax2.axvline(START_YEAR + window_center_offset, color='red', linestyle='--', alpha=0.7, linewidth=2, label='Observed period center')
@@ -911,101 +911,101 @@ def plot_scenario_comparison(scenario_results, fig_dir):
     plt.savefig(os.path.join(fig_dir, 'cmip_scenario_timeseries_comparison.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
-def plot_lowess_fit(lowess_results_df, fig_dir):
-    """Scatter plot of observed vs. modeled data with a LOWESS fit line."""
+# def plot_lowess_fit(lowess_results_df, fig_dir):
+#     """Scatter plot of observed vs. modeled data with a LOWESS fit line."""
     
-    cfg = PLOT_CONFIG['variability']
+#     cfg = PLOT_CONFIG['variability']
 
-    print("Plotting LOWESS fit...")
+#     print("Plotting LOWESS fit...")
 
-    #get data
-    obs_points = lowess_results_df['obs_points'].dropna().values
-    model_points = lowess_results_df['model_points'].dropna().values
-    lowess_df = lowess_results_df[['x_fit', 'y_fit']].dropna()
-    frac = lowess_results_df.attrs.get('frac', 'N/A')
+#     #get data
+#     obs_points = lowess_results_df['obs_points'].dropna().values
+#     model_points = lowess_results_df['model_points'].dropna().values
+#     lowess_df = lowess_results_df[['x_fit', 'y_fit']].dropna()
+#     frac = lowess_results_df.attrs.get('frac', 'N/A')
 
-    #plotting
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(obs_points, model_points, alpha=0.3, s=10, color='gray', label='Grid-point comparison')
-    ax.plot(lowess_df['x_fit'], lowess_df['y_fit'], color='red', linewidth=3, label=f'LOWESS Fit (frac={frac})')
+#     #plotting
+#     fig, ax = plt.subplots(figsize=(8, 8))
+#     ax.scatter(obs_points, model_points, alpha=0.3, s=10, color='gray', label='Grid-point comparison')
+#     ax.plot(lowess_df['x_fit'], lowess_df['y_fit'], color='red', linewidth=3, label=f'LOWESS Fit (frac={frac})')
     
-    #1:1 reference line
-    lim_min = min(np.min(obs_points), np.min(model_points)) * 0.9
-    lim_max = max(np.max(obs_points), np.max(model_points)) * 1.1
-    ax.plot([lim_min, lim_max], [lim_min, lim_max], 'k--', linewidth=2, label='1:1 Line')
+#     #1:1 reference line
+#     lim_min = min(np.min(obs_points), np.min(model_points)) * 0.9
+#     lim_max = max(np.max(obs_points), np.max(model_points)) * 1.1
+#     ax.plot([lim_min, lim_max], [lim_min, lim_max], 'k--', linewidth=2, label='1:1 Line')
     
-    #formatting
-    ax.set_xlabel(f'Observed {cfg["name"]} ({cfg["units"]})', fontsize=12)
-    ax.set_ylabel(f'Modeled {cfg["name"]} ({cfg["units"]})', fontsize=12)
-    ax.set_title(f'Modeled vs. observed {cfg["name"]}\nGrid-point comparison with LOWESS smoothing', fontsize=14, fontweight='bold')
-    ax.set_xlim(lim_min, lim_max)
-    ax.set_ylim(lim_min, lim_max)
-    ax.grid(True, linestyle=':', alpha=0.7)
-    ax.legend()
-    ax.set_aspect('equal', adjustable='box')
+#     #formatting
+#     ax.set_xlabel(f'Observed {cfg["name"]} ({cfg["units"]})', fontsize=12)
+#     ax.set_ylabel(f'Modeled {cfg["name"]} ({cfg["units"]})', fontsize=12)
+#     ax.set_title(f'Modeled vs. observed {cfg["name"]}\nGrid-point comparison with LOWESS smoothing', fontsize=14, fontweight='bold')
+#     ax.set_xlim(lim_min, lim_max)
+#     ax.set_ylim(lim_min, lim_max)
+#     ax.grid(True, linestyle=':', alpha=0.7)
+#     ax.legend()
+#     ax.set_aspect('equal', adjustable='box')
     
-    plt.tight_layout()
+#     plt.tight_layout()
     
-    filename = os.path.join(fig_dir, f'lowess_fit_{cfg["name"]}.png')
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
-    print(f"LOWESS plot saved to: {filename}")
-    plt.show()
+#     filename = os.path.join(fig_dir, f'lowess_fit_{cfg["name"]}.png')
+#     plt.savefig(filename, dpi=300, bbox_inches='tight')
+#     print(f"LOWESS plot saved to: {filename}")
+#     plt.show()
 
-def plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, fig_dir):
-    """Plots the spatial distribution of the residuals from the LOWESS fit."""
+# def plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, fig_dir):
+#     """Plots the spatial distribution of the residuals from the LOWESS fit."""
     
-    cfg = PLOT_CONFIG['variability']
+#     cfg = PLOT_CONFIG['variability']
 
-    print("Plotting LOWESS fit residuals spatially...")
+#     print("Plotting LOWESS fit residuals spatially...")
 
-    #data arrays
-    obs_data = sliding_results['odsl_var_obs_regridded']
-    model_data = cmip_results['model_mean_variability']
+#     #data arrays
+#     obs_data = sliding_results['odsl_var_obs_regridded']
+#     model_data = cmip_results['model_mean_variability']
     
-    #flatten and mask
-    x_flat = obs_data.values.flatten()
-    y_flat = model_data.values.flatten()
-    valid_mask = ~np.isnan(x_flat) & ~np.isnan(y_flat)
+#     #flatten and mask
+#     x_flat = obs_data.values.flatten()
+#     y_flat = model_data.values.flatten()
+#     valid_mask = ~np.isnan(x_flat) & ~np.isnan(y_flat)
 
-    #smoothed fit line
-    lowess_df = lowess_results_df[['x_fit', 'y_fit']].dropna()
+#     #smoothed fit line
+#     lowess_df = lowess_results_df[['x_fit', 'y_fit']].dropna()
     
-    #interpolation
-    fit_values = np.interp(
-        x=lowess_results_df['obs_points'].dropna().values,
-        xp=lowess_df['x_fit'],
-        fp=lowess_df['y_fit']
-    )
+#     #interpolation
+#     fit_values = np.interp(
+#         x=lowess_results_df['obs_points'].dropna().values,
+#         xp=lowess_df['x_fit'],
+#         fp=lowess_df['y_fit']
+#     )
     
-    #residual (model value - expected trend value)
-    residuals_1d = lowess_results_df['model_points'].dropna().values - fit_values
+#     #residual (model value - expected trend value)
+#     residuals_1d = lowess_results_df['model_points'].dropna().values - fit_values
 
-    #empty 2D array and filling it with the residuals at the correct locations
-    residuals_2d_flat = np.full(x_flat.shape, np.nan)
-    residuals_2d_flat[valid_mask] = residuals_1d
-    residuals_map = xr.DataArray(residuals_2d_flat.reshape(obs_data.shape), coords=obs_data.coords,name='lowess_residual')
+#     #empty 2D array and filling it with the residuals at the correct locations
+#     residuals_2d_flat = np.full(x_flat.shape, np.nan)
+#     residuals_2d_flat[valid_mask] = residuals_1d
+#     residuals_map = xr.DataArray(residuals_2d_flat.reshape(obs_data.shape), coords=obs_data.coords,name='lowess_residual')
 
-    #plotting
-    proj = ccrs.AlbersEqualArea(
-        central_longitude=PROJECTION_PARAMS['central_longitude'],
-        central_latitude=PROJECTION_PARAMS['central_latitude'],
-        standard_parallels=PROJECTION_PARAMS['standard_parallels']
-    )
-    fig, ax = plt.subplots(figsize=(9, 8), subplot_kw={'projection': proj})
-    add_map_features(ax, EXTENT, is_left=True, is_bottom=True)
+#     #plotting
+#     proj = ccrs.AlbersEqualArea(
+#         central_longitude=PROJECTION_PARAMS['central_longitude'],
+#         central_latitude=PROJECTION_PARAMS['central_latitude'],
+#         standard_parallels=PROJECTION_PARAMS['standard_parallels']
+#     )
+#     fig, ax = plt.subplots(figsize=(9, 8), subplot_kw={'projection': proj})
+#     add_map_features(ax, EXTENT, is_left=True, is_bottom=True)
 
-    #diverging colormap and a symmetric color scale
-    vmax = abs(residuals_map.quantile(0.98, skipna=True).item())
-    mesh = residuals_map.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), cmap='RdBu_r', vmin=-vmax, vmax=vmax, add_colorbar=False)
+#     #diverging colormap and a symmetric color scale
+#     vmax = abs(residuals_map.quantile(0.98, skipna=True).item())
+#     mesh = residuals_map.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), cmap='RdBu_r', vmin=-vmax, vmax=vmax, add_colorbar=False)
     
-    cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
-    cbar.set_label(f'LOWESS fit residual ({cfg["units"]})', fontsize=10)
+#     cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
+#     cbar.set_label(f'LOWESS fit residual ({cfg["units"]})', fontsize=10)
     
-    ax.set_title(f'Spatial pattern of LOWESS fit residuals\n(Model variability - expected trend)', fontsize=12, pad=15, fontweight='bold')
+#     ax.set_title(f'Spatial pattern of LOWESS fit residuals\n(Model variability - expected trend)', fontsize=12, pad=15, fontweight='bold')
     
-    filename = os.path.join(fig_dir, f'lowess_residuals_spatial_{cfg["name"]}.png')
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
-    plt.show()
+#     filename = os.path.join(fig_dir, f'lowess_residuals_spatial_{cfg["name"]}.png')
+#     plt.savefig(filename, dpi=300, bbox_inches='tight')
+#     plt.show()
 
 def plot_yearly_odsl_anomaly(obs_results, fig_dir):
     """The yearly observed ODSL anomaly for each year in the analysis period."""
@@ -1066,37 +1066,48 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
 
     for source_name in sources_to_plot:
         if source_name not in all_eof_results:
-            print(f"  Skipping spatial EOF plot for '{source_name}'; results not found.")
+            print(f"Skipping spatial EOF plot for '{source_name}'; results not found.")
             continue
 
-        print(f"  Generating spatial EOF plot for: {source_name}")
+        print(f"Generating spatial EOF plot for: {source_name}")
         eof_results = all_eof_results[source_name]
         eofs = eof_results['eofs']
         variance = eof_results['variance_fractions']
 
+        proj = ccrs.AlbersEqualArea(
+            central_longitude=PROJECTION_PARAMS['central_longitude'],
+            central_latitude=PROJECTION_PARAMS['central_latitude'],
+            standard_parallels=PROJECTION_PARAMS['standard_parallels']
+        )
+
         #plot
         fig, axes = plt.subplots(
             nrows=num_modes_to_plot,
-            figsize=(8, 4 * num_modes_to_plot),
-            subplot_kw={'projection': ccrs.Robinson(central_longitude=-30)}
+            figsize=(7, 5 * num_modes_to_plot),
+            subplot_kw={'projection': proj}
         )
 
         if num_modes_to_plot == 1: axes = [axes]
 
         for i in range(num_modes_to_plot):
             ax = axes[i]
+            is_bottom = (i == num_modes_to_plot - 1)
+            add_map_features(ax, EXTENT, is_left=True, is_bottom=is_bottom)
             mode_data = eofs.sel(mode=i)
-            mode_data.plot(ax=ax, transform=ccrs.PlateCarree(), cmap='coolwarm',
-                           cbar_kwargs={'label': 'Amplitude'})
-            ax.coastlines()
-            ax.set_title(f"EOF Mode {i+1} ({variance.sel(mode=i).item()*100:.1f}% variance)")
+            
+            vmax = abs(mode_data).max()
+            mesh = ax.pcolormesh(mode_data.longitude, mode_data.latitude, mode_data, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-vmax, vmax=vmax)
+            cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
+            cbar.set_label('Amplitude')
+            ax.set_title(f"EOF mode {i+1} ({variance.sel(mode=i).item()*100:.1f}% variance)")
 
-        fig.suptitle(f'Spatial EOF Patterns for {source_name.upper()}', fontsize=16, fontweight='bold', y=1.02)
-        plt.tight_layout()
+        fig.suptitle(f'Spatial EOF patterns for {source_name.upper()}', fontsize=16, fontweight='bold')
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
         
         output_path = os.path.join(fig_dir, f'spatial_eofs_{source_name}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
+        plt.show()
+        #plt.close(fig)
 
 def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
     """Creates a scree plot and PC time series plot for each specified data source."""
@@ -1105,10 +1116,10 @@ def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
 
     for source_name in sources_to_plot:
         if source_name not in all_eof_results:
-            print(f"  Skipping scree/PC plot for '{source_name}'; results not found.")
+            print(f"Skipping scree/PC plot for '{source_name}'; results not found.")
             continue
 
-        print(f"  Generating scree and PC plot for: {source_name}")
+        print(f"Generating scree and PC plot for: {source_name}")
         eof_results = all_eof_results[source_name]
         variance = eof_results['variance_fractions']
         pcs = eof_results['pcs']
@@ -1137,7 +1148,8 @@ def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
         
         output_path = os.path.join(fig_dir, f'scree_plot_and_pcs_{source_name}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
+        plt.show()
+        #plt.close(fig)
 
 def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, mode_x=0, mode_y=1):
     """Creates a biplot of PCs and index correlations for each specified data source."""
@@ -1146,10 +1158,10 @@ def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, m
 
     for source_name in sources_to_plot:
         if source_name not in all_eof_results or source_name not in all_correlation_results:
-            print(f"  Skipping biplot for '{source_name}'; results not found.")
+            print(f"Skipping biplot for '{source_name}'; results not found.")
             continue
             
-        print(f"  Generating correlation biplot for: {source_name}")
+        print(f"Generating correlation biplot for: {source_name}")
         eof_results = all_eof_results[source_name]
         correlation_results = all_correlation_results[source_name]
         
@@ -1177,66 +1189,143 @@ def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, m
         
         output_path = os.path.join(fig_dir, f'correlation_biplot_{source_name}_pc{mode_x+1}_vs_pc{mode_y+1}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
+        plt.show()
+        #plt.close(fig)
 
-def plot_correlation_table(all_correlation_results, fig_dir):
-    """Generates and saves a figure containing a table of PC-index correlations."""
+def export_eof_results_to_csv(all_eof_results, all_correlation_results, fig_dir):
+    """CSV file summarizing the results of the EOF analysis
+    for all data sources."""
 
-    print("Generating EOF correlation overview table figure...")
-
-    table_data = []
-
-    source_order = [s for s in ['observed', 'mmm'] if s in all_correlation_results]
-    index_order = sorted(list(all_correlation_results.get(source_order[0], {}).keys()))
+    print("Exporting full EOF analysis results to CSV...")
     
+    table_data = []
+    
+    source_order = sorted(all_eof_results.keys())
+    
+    try:
+        index_names = sorted(list(next(iter(all_correlation_results.values())).keys()))
+    except StopIteration:
+        print("No correlation results found to export.")
+        index_names = []
+
     for source_name in source_order:
-        corr_dict = all_correlation_results[source_name]
-        for index_name in index_order:
-            if index_name not in corr_dict: continue
-                
-            corr_da = corr_dict[index_name]
-            row_data = {'Source': source_name.upper(), 'Index': index_name.upper()}
-            for mode in corr_da.mode.values:
-                val = corr_da.sel(mode=mode).item()
-                row_data[f'Mode {mode+1}'] = f"{val:.2f}" if pd.notna(val) else "N/A"
+        if source_name not in all_eof_results: continue
+        
+        eof_res = all_eof_results[source_name]
+        corr_res = all_correlation_results.get(source_name, {})
+        
+        for mode in eof_res['pcs'].mode.values:
+            row_data = {
+                'Source': source_name,
+                'Mode': mode + 1,
+                'Variance Fraction (%)': eof_res['variance_fractions'].sel(mode=mode).item() * 100
+            }
+            
+            for index_name in index_names:
+                col_name = f'{index_name.upper()} Correlation'
+                if index_name in corr_res:
+                    row_data[col_name] = corr_res[index_name].sel(mode=mode).item()
+                else:
+                    row_data[col_name] = None
+            
             table_data.append(row_data)
 
     if not table_data:
-        print("  No correlation data to plot.")
+        print("No EOF data available to export to CSV.")
         return
-        
+
+    #DataFrame
     df = pd.DataFrame(table_data)
+    
+    #save to csv
+    output_path = os.path.join(fig_dir, 'full_eof_analysis_summary.csv')
+    df.to_csv(output_path, index=False, float_format='%.3f')
+    print(f"Successfully saved EOF summary to {output_path}")
+
+def plot_eof_summary_table(all_eof_results, all_correlation_results, fig_dir):
+    """Table summarizing the key metrics (variance fraction, index correlations) for each EOF mode across all data sources."""
+
+    print("Generating EOF summary table figure...")
+
+    table_data = []
+    
+    #dynamic order of sources and indices
+    source_order = sorted(all_eof_results.keys())
+    try:
+        index_names = sorted(list(next(iter(all_correlation_results.values())).keys()))
+    except StopIteration:
+        index_names = []
+
+    for source_name in source_order:
+        if source_name not in all_eof_results: continue
+            
+        eof_res = all_eof_results[source_name]
+        corr_res = all_correlation_results.get(source_name, {})
+        
+        row_data = {'Source': source_name}
+        
+        for mode in eof_res['pcs'].mode.values:
+            #variance fraction
+            var_frac = eof_res['variance_fractions'].sel(mode=mode).item() * 100
+            row_data[f'Mode {mode+1}\nVar. (%)'] = var_frac
+            
+            #correlations
+            for index_name in index_names:
+                col_name = f'Mode {mode+1}\n{index_name.upper()}'
+                if index_name in corr_res:
+                    row_data[col_name] = corr_res[index_name].sel(mode=mode).item()
+                else:
+                    row_data[col_name] = None
+        
+        table_data.append(row_data)
+
+    if not table_data:
+        print("No EOF data to create a summary table.")
+        return
+
+    df = pd.DataFrame(table_data).set_index('Source')
 
     #plot
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig_height = max(4, len(df) * 0.5)
+    fig, ax = plt.subplots(figsize=(14, fig_height))
     ax.axis('off')
 
     #table
-    table = ax.table(cellText=df.values, colLabels=df.columns, loc='center', cellLoc='center', colColours=['#f2f2f2'] * len(df.columns))
+    table = ax.table(cellText=df.round(2).values, colLabels=df.columns, rowLabels=df.index, loc='center', cellLoc='center', rowColours=['#f2f2f2'] * len(df))
     
     table.auto_set_font_size(False)
     table.set_fontsize(10)
-    table.scale(1.2, 1.5)
+    table.scale(1, 1.5)
 
     #style
-    norm = TwoSlopeNorm(vmin=-1.0, vcenter=0, vmax=1.0)
-    cmap = plt.get_cmap('coolwarm')
+    var_cmap = plt.get_cmap('YlGn')
+    var_norm = Normalize(vmin=0, vmax=100)
     
-    #apply colors
-    for i in range(len(df)):
+    #colormap
+    corr_cmap = plt.get_cmap('coolwarm')
+    corr_norm = TwoSlopeNorm(vmin=-1.0, vcenter=0, vmax=1.0)
+
+    for i in range(len(df)): 
         for j in range(len(df.columns)):
             cell = table[i + 1, j]
-            if df.columns[j] not in ['Source', 'Index']:
-                try:
-                    val = float(df.iloc[i, j])
-                    cell.set_facecolor(cmap(norm(val)))
-                    if abs(val) > 0.5:
-                        cell.get_text().set_color('white')
-                except (ValueError, TypeError):
-                    cell.set_facecolor('white')
+            val = df.iloc[i, j]
+            col_name = df.columns[j]
+            
+            if pd.isna(val):
+                cell.set_facecolor('white')
+                continue
 
-    fig.suptitle('PC correlations with climate indices', fontsize=16, fontweight='bold')
+            if 'Var' in col_name:
+                cell.set_facecolor(var_cmap(var_norm(val)))
+            else: 
+                cell.set_facecolor(corr_cmap(corr_norm(val)))
+                if abs(val) > 0.6:
+                    cell.get_text().set_color('white')
+
+    fig.suptitle('EOF Analysis Summary: Variance and Index Correlations', fontsize=16, fontweight='bold')
+    plt.tight_layout(pad=1.5)
     
-    output_path = os.path.join(fig_dir, 'eof_correlation_table.png')
+    output_path = os.path.join(fig_dir, 'eof_summary_table.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
+    plt.show()
+    #plt.close(fig)

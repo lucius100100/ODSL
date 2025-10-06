@@ -241,7 +241,7 @@ def detrend_timeseries(data_array, degree=1, dim='time'):
     #return residuals
     return data_array - fit
 
-def calculate_single_eof(data_array, n_modes=5):
+def calculate_single_eof(data_array, n_modes=3):
     """Helper function to perform EOF analysis on a single DataArray."""
 
     if data_array.time.size < n_modes:

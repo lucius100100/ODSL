@@ -7,16 +7,17 @@ Configuration file for ODSL analysis and plotting.
 #parameters
 CMIP_VERSION               = 'CMIP6'           #CMIP version to be used: 'CMIP5' or 'CMIP6'
 START_YEAR                 = 1993              #observed period
-END_YEAR                   = 2024
+END_YEAR                   = 2023
 #EXTENT                     = [-65, 40, 50, 80] #North Atlantic
 EXTENT                     = [-100, 20, 8, 80] #North Atlantic
 USE_CACHE                  = True              #cache settings
 FORCE_RECOMPUTE            = False
-VARIABILITY_DETREND_DEGREE = 4                 #variability polynomial degree: 1=linear, 2=quadratic, 3=cubic, 4=quartic, etc...
-PLOT_VARIABLE              = 'trend'     #what to plot: 'trend', 'variability'
+VARIABILITY_DETREND_DEGREE = 2                 #variability polynomial degree: 1=linear, 2=quadratic, etc...
+PLOT_VARIABLE              = 'variability'     #what to plot: 'trend', 'variability'
 CMIP5_FUTURE_SCENARIO      = 'rcp45'           #CMIP future scenario to be used after historical
 CMIP6_FUTURE_SCENARIO      = 'ssp245'
-LOWESS_FRAC                = 0.5               #LOWESS smoothing parameter (between 0 and 1)
+#LOWESS_FRAC                = 0.5               #LOWESS smoothing parameter (between 0 and 1)
+EOF_N_MODES                = 3                 #number of EOF modes to compute
 
 PLOT_CONFIG = {
     'trend': {
