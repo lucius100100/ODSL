@@ -4,7 +4,7 @@
 Plotting functions for ODSL analysis.
 """
 
-from utils import calculate_weighted_stats, create_region_mask
+from utils import calculate_weighted_stats, create_region_mask, add_map_features
 from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG)
 
 import numpy as np
@@ -20,6 +20,9 @@ import matplotlib.patches as mpatches
 import matplotlib.ticker as mticker
 import seaborn as sns
 from matplotlib.colors import Normalize, TwoSlopeNorm
+from scipy import stats
+from matplotlib.colors import LogNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 def create_all_figures(obs_results, cmip_results, sliding_results, scenario_results, eof_results, correlation_results, fig_dir):
     """Generate all figures for the analysis."""
@@ -38,6 +41,18 @@ def create_all_figures(obs_results, cmip_results, sliding_results, scenario_resu
     if not os.path.exists(eof_fig_dir):
         os.makedirs(eof_fig_dir)
 
+    print(f"\nGenerating figures for {PLOT_VARIABLE.upper()}")
+    print(f"Figures will be saved in: {fig_dir}")
+
+    plot_scatter_comparison_individual_models(cmip_results, sliding_results, variable_fig_dir)
+    plot_scatter_comparison(cmip_results, sliding_results, variable_fig_dir)
+    #plot_yearly_odsl_anomaly(obs_results, fig_dir)
+
+    if PLOT_VARIABLE == 'trend':
+        plot_observed_odsl_components(obs_results, variable_fig_dir)
+    elif PLOT_VARIABLE == 'variability':
+        plot_observed_variability(obs_results, variable_fig_dir)
+
     plot_eof_summary_table(eof_results, correlation_results, eof_fig_dir)
     export_eof_results_to_csv(eof_results, correlation_results, eof_fig_dir)
     plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=3)
@@ -45,15 +60,12 @@ def create_all_figures(obs_results, cmip_results, sliding_results, scenario_resu
     plot_correlation_biplot(eof_results, correlation_results, eof_fig_dir, mode_x=0, mode_y=1)
     #plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, variable_fig_dir)
     #plot_lowess_fit(lowess_results_df, variable_fig_dir)
-    plot_scenario_comparison(scenario_results, variable_fig_dir)
+    plot_scenario_comparison(scenario_results, fig_dir)
 
-    print(f"\nGenerating figures for {PLOT_VARIABLE.upper()}")
-    print(f"Figures will be saved in: {variable_fig_dir}")
-
-    if PLOT_VARIABLE == 'trend':
-        plot_observed_odsl_components(obs_results, variable_fig_dir)
-    elif PLOT_VARIABLE == 'variability':
-        plot_observed_variability(obs_results, variable_fig_dir)
+    # if PLOT_VARIABLE == 'trend':
+    #     plot_observed_odsl_components(obs_results, variable_fig_dir)
+    # elif PLOT_VARIABLE == 'variability':
+    #     plot_observed_variability(obs_results, variable_fig_dir)
 
     plot_cmip_multimodel_mean(cmip_results, variable_fig_dir)
     plot_observed_vs_modeled(cmip_results, sliding_results, variable_fig_dir)
@@ -62,38 +74,13 @@ def create_all_figures(obs_results, cmip_results, sliding_results, scenario_resu
     plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir)
     #plot_yearly_odsl_anomaly(obs_results, fig_dir)
 
-def add_map_features(ax, extent, is_left=False, is_bottom=False):
-    """Add standard map features to axis."""
-
-    lon_min, lon_max, lat_min, lat_max = extent
-    boundary_path = mpath.Path([
-        [lon_min, lat_min], [lon_max, lat_min],
-        [lon_max, lat_max], [lon_min, lat_max],
-        [lon_min, lat_min]
-    ]).interpolated(50)
-    
-    proj_to_data = ccrs.PlateCarree()._as_mpl_transform(ax) - ax.transData
-    boundary_in_proj_coords = proj_to_data.transform_path(boundary_path)
-    ax.set_boundary(boundary_in_proj_coords)
-    
-    verts = boundary_in_proj_coords.vertices
-    ax.set_xlim(verts[:, 0].min(), verts[:, 0].max())
-    ax.set_ylim(verts[:, 1].min(), verts[:, 1].max())
-    
-    ax.add_feature(cfeature.LAND, color='lightgray', zorder=1)
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
-    
-    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='-')
-    gl.top_labels = False
-    gl.right_labels = False
-    gl.left_labels = is_left
-    gl.bottom_labels = is_bottom
-
 def plot_observed_odsl_components(obs_results, fig_dir):
     """Plot the components of observed ODSL."""
 
     print("Plotting observed ODSL components...")
     
+    cfg = PLOT_CONFIG['trend']
+
     #projection
     proj = ccrs.AlbersEqualArea(
         central_longitude=PROJECTION_PARAMS['central_longitude'],
@@ -121,34 +108,37 @@ def plot_observed_odsl_components(obs_results, fig_dir):
     stats_odsl = calculate_weighted_stats(odsl, region_mask)
     
     #color scale
-    vmax = max(abs(msl.quantile(0.98)), abs(geoid.quantile(0.98)))
+    vmax = max(abs(msl.quantile(0.98, skipna=True).item()), abs(geoid.quantile(0.98, skipna=True).item()), abs(gia.quantile(0.98, skipna=True).item()), abs(odsl.quantile(0.98, skipna=True).item()))
     
     #plotting
-    im1 = ax1.pcolormesh(msl.longitude, msl.latitude, msl, transform=ccrs.PlateCarree(), cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='auto')
+    im1 = msl.plot.contourf(ax=ax1, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=-vmax, vmax=vmax, levels=50, add_colorbar=False)
     add_map_features(ax1, EXTENT, is_left=True, is_bottom=True)
     ax1.set_title(f'a) MSL (Altimetry SLA)\nMean: {stats_msl["mean_x"]:.2f} mm/yr, RMS: {stats_msl["std_x"]:.2f} mm/yr')
-    
-    im2 = ax2.pcolormesh(geoid.longitude, geoid.latitude, geoid, transform=ccrs.PlateCarree(), cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='auto')
+
+    im2 = geoid.plot.contourf(ax=ax2, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=-vmax, vmax=vmax, levels=50, add_colorbar=False)
     add_map_features(ax2, EXTENT, is_left=True, is_bottom=True)
     ax2.set_title(f'b) Geoid (Frederikse budget ASL)\nMean: {stats_geoid["mean_x"]:.2f} mm/yr, RMS: {stats_geoid["std_x"]:.2f} mm/yr')
-    
-    im3 = ax3.pcolormesh(gia.longitude, gia.latitude, gia, transform=ccrs.PlateCarree(), cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='auto')
+
+    im3 = gia.plot.contourf(ax=ax3, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=-vmax, vmax=vmax, levels=50, add_colorbar=False)
     add_map_features(ax3, EXTENT, is_left=True, is_bottom=True)
     ax3.set_title(f'c) GIA\nMean: {stats_gia["mean_x"]:.2f} mm/yr, RMS: {stats_gia["std_x"]:.2f} mm/yr')
-    
-    im4 = ax4.pcolormesh(odsl.longitude, odsl.latitude, odsl, transform=ccrs.PlateCarree(), cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='auto')
+
+    im4 = odsl.plot.contourf(ax=ax4, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=-vmax, vmax=vmax, levels=50, add_colorbar=False)
     add_map_features(ax4, EXTENT, is_left=True, is_bottom=True)
     ax4.set_title(f'd) ODSL (MSL - Geoid - GIA)\nMean: {stats_odsl["mean_x"]:.2f} mm/yr, RMS: {stats_odsl["std_x"]:.2f} mm/yr')
     
     #colorbar
     cbar_ax = fig.add_axes([0.2, 0.08, 0.6, 0.025])
     cbar = fig.colorbar(im1, cax=cbar_ax, orientation='horizontal')
+    cbar.set_ticks(np.arange(np.ceil(-vmax), np.floor(vmax) + 1))
+    cbar.set_ticks([], minor=True)
     cbar.set_label('Sea level trend (mm/yr)', fontsize=14)
     
     plt.suptitle(f'Observed ODSL trend ({common_years.min()}-{common_years.max()})', fontsize=16, fontweight='bold', y=0.98)
     
     plt.savefig(os.path.join(fig_dir, f'ODSL_components_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 def plot_cmip_multimodel_mean(cmip_results, fig_dir):
     """Plot CMIP multi-model mean ODSL."""
@@ -182,13 +172,12 @@ def plot_cmip_multimodel_mean(cmip_results, fig_dir):
         vmax = data_to_plot.quantile(0.98, skipna=True).item()
         vmin = data_to_plot.quantile(0.02, skipna=True).item()
 
-    mesh = data_to_plot.plot.pcolormesh(
-        ax=ax, transform=ccrs.PlateCarree(), cmap=cfg['cmap'],
-        vmin=vmin, vmax=vmax, add_colorbar=False 
-    )
+    mesh = data_to_plot.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=vmin, vmax=vmax, add_colorbar=False, levels=50)
     
     #colorbar
     cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
+    cbar.set_ticks(np.arange(np.ceil(vmin), np.floor(vmax) + 1))
+    cbar.set_ticks([], minor=True)
     cbar.set_label(f'ODSL {cfg["name"]} ({cfg["units"]})', fontsize=10)
     
     #regional statistics
@@ -199,7 +188,8 @@ def plot_cmip_multimodel_mean(cmip_results, fig_dir):
         f'CMIP multi-model mean ({valid_models_count} models (historical + RCP4.5))\n' f'ODSL trend ({START_YEAR}-{END_YEAR}) Mean: {stats_model["mean_x"]:.2f} mm/yr,' f'RMS: {stats_model["std_x"]:.2f} {cfg["units"]}',fontsize=12, pad=15, fontweight='bold')
     
     plt.savefig(os.path.join(fig_dir, f'CMIP_multimodel_mean_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 def plot_observed_vs_modeled(cmip_results, sliding_results, fig_dir):
     """Plot observed vs modeled ODSL comparison for trend or variability."""
@@ -232,7 +222,9 @@ def plot_observed_vs_modeled(cmip_results, sliding_results, fig_dir):
 
     difference = model_data - obs_data
     vmax_diff = abs(difference.quantile(0.98, skipna=True).item())
-    
+    vmin_diff = -vmax_diff
+    cmap_diff = 'BrBG'
+        
     region_mask = create_region_mask(model_data, EXTENT)
     stats_comparison = calculate_weighted_stats(model_data, region_mask, data_y=obs_data)
     stats_difference = calculate_weighted_stats(difference, region_mask)
@@ -247,29 +239,48 @@ def plot_observed_vs_modeled(cmip_results, sliding_results, fig_dir):
 
     #subplot 1: observed ODSL
     add_map_features(ax1, EXTENT, is_left=True, is_bottom=True)
-    mesh1 = obs_data.plot.pcolormesh(ax=ax1, transform=ccrs.PlateCarree(), cmap=cmap_unified, vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False)
+    mesh1 = obs_data.plot.contourf(ax=ax1, transform=ccrs.PlateCarree(), cmap=cmap_unified, vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False, levels=50)
     ax1.set_title(f'a) Observed ODSL ({cfg["name"]})\nMean: {stats_comparison["mean_y"]:.2f} {cfg["units"]}, RMS: {stats_comparison["std_y"]:.2f} {cfg["units"]}', fontsize=11)
 
     #subplot 2: modelled ODSL
     add_map_features(ax2, EXTENT, is_left=False, is_bottom=True)
-    mesh2 = model_data.plot.pcolormesh(ax=ax2, transform=ccrs.PlateCarree(), cmap=cmap_unified, vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False)
+    mesh2 = model_data.plot.contourf(ax=ax2, transform=ccrs.PlateCarree(), cmap=cmap_unified, vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False, levels=50)
     ax2.set_title(f'b) CMIP mean ODSL ({cfg["name"]})\nMean: {stats_comparison["mean_x"]:.2f} {cfg["units"]}, RMS: {stats_comparison["std_x"]:.2f} {cfg["units"]}', fontsize=11)
     
     #subplot 3: difference (model - observed)
     add_map_features(ax3, EXTENT, is_left=False, is_bottom=True)
-    mesh3 = difference.plot.pcolormesh(ax=ax3, transform=ccrs.PlateCarree(), cmap=cmap_unified, vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False)
+    mesh3 = difference.plot.contourf(ax=ax3, transform=ccrs.PlateCarree(), cmap=cmap_diff, vmin=vmin_diff, vmax=vmax_diff, add_colorbar=False, levels=50)
     ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.2f} {cfg["units"]}, RMS: {stats_difference["std_x"]:.2f} {cfg["units"]}', fontsize=11)
     
     fig.suptitle(f'Observed vs. modeled ODSL {cfg["name"]} ({START_YEAR}-{END_YEAR})\n' f'North Atlantic PCC = {pcc_w:.2f}', fontsize=16, y=1.02, fontweight='bold')
     
-    cbar_ax = fig.add_axes([0.2, 0.1, 0.6, 0.03])
-    cbar = fig.colorbar(mesh1, cax=cbar_ax, orientation='horizontal')
-    cbar.set_label(f'{cfg["name"]} ({cfg["units"]})', fontsize=12)
-    
     fig.subplots_adjust(left=0.05, right=0.95, bottom=0.15, top=0.85, wspace=0.15)
+
+    #colorbars position
+    pos1 = ax1.get_position()
+    pos2 = ax2.get_position()
+    pos3 = ax3.get_position()
+
+    cbar_bottom = pos1.y0 - 0.12 
+    cbar_height = 0.03
+
+    #shared colorbar observed and modeled
+    cbar_ax1 = fig.add_axes([pos1.x0, cbar_bottom, pos2.x1 - pos1.x0, cbar_height])
+    cbar1 = fig.colorbar(mesh1, cax=cbar_ax1, orientation='horizontal')
+    cbar1.set_ticks(np.arange(np.ceil(vmin_unified), np.floor(vmax_unified) + 1))
+    cbar1.set_ticks([], minor=True)
+    cbar1.set_label(f'{cfg["name"]} ({cfg["units"]})', fontsize=12)
+    
+    #colorbar difference
+    cbar_ax2 = fig.add_axes([pos3.x0, cbar_bottom, pos3.width, cbar_height])
+    cbar2 = fig.colorbar(mesh3, cax=cbar_ax2, orientation='horizontal')
+    cbar2.set_ticks(np.arange(np.ceil(vmin_diff), np.floor(vmax_diff) + 1))
+    cbar2.set_ticks([], minor=True)
+    cbar2.set_label(f'Difference ({cfg["units"]})', fontsize=12)
     
     plt.savefig(os.path.join(fig_dir, f'observed_vs_modeled_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 def plot_sliding_window_timeseries(sliding_results, fig_dir):
     """Plot PCC and RMSE time series from sliding window analysis."""
@@ -361,7 +372,8 @@ def plot_sliding_window_timeseries(sliding_results, fig_dir):
         ax.minorticks_on()
     
     plt.savefig(os.path.join(fig_dir, f'sliding_window_timeseries_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 def plot_best_and_worst_matching_periods(sliding_results, fig_dir):
     """Calculates and plots the best and worst matching observed window periods."""
@@ -540,7 +552,8 @@ def plot_best_and_worst_matching_periods(sliding_results, fig_dir):
 
     plt.tight_layout()
     plt.savefig(os.path.join(fig_dir, f'best_and_worst_matching_periods_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
     """Calculates and plots a summary of model-observation comparison statistics."""
@@ -759,7 +772,8 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir):
 
     plt.tight_layout()
     plt.savefig(os.path.join(fig_dir, f'model_comparison_summary_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 def plot_observed_variability(obs_results, fig_dir):
     """Plot the observed ODSL variability."""
@@ -786,10 +800,12 @@ def plot_observed_variability(obs_results, fig_dir):
     vmin = variability.quantile(0.02, skipna=True).item()
 
     #plotting
-    mesh = variability.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=vmin, vmax=vmax, add_colorbar=False)
-    
+    mesh = variability.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=vmin, vmax=vmax, add_colorbar=False, levels=50)
+
     #colorbar
     cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
+    cbar.set_ticks(np.arange(np.ceil(vmin), np.floor(vmax) + 1))
+    cbar.set_ticks([], minor=True)
     cbar.set_label(f'ODSL {cfg["name"]} ({cfg["units"]})', fontsize=10)
     
     #statistics
@@ -801,7 +817,8 @@ def plot_observed_variability(obs_results, fig_dir):
     
     #save figure
     plt.savefig(os.path.join(fig_dir, f'Observed_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 def plot_scenario_comparison(scenario_results, fig_dir):
     """Plot timeseries comparison of CMIP5 and CMIP6 ensemble scenarios."""
@@ -909,7 +926,8 @@ def plot_scenario_comparison(scenario_results, fig_dir):
     plt.suptitle(f'ODSL CMIP scenario comparison\nNorth Atlantic region ({EXTENT[0]}°E-{EXTENT[1]}°E, {EXTENT[2]}°N-{EXTENT[3]}°N)', fontsize=16, fontweight='bold', y=0.98)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig(os.path.join(fig_dir, 'cmip_scenario_timeseries_comparison.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 # def plot_lowess_fit(lowess_results_df, fig_dir):
 #     """Scatter plot of observed vs. modeled data with a LOWESS fit line."""
@@ -996,7 +1014,7 @@ def plot_scenario_comparison(scenario_results, fig_dir):
 
 #     #diverging colormap and a symmetric color scale
 #     vmax = abs(residuals_map.quantile(0.98, skipna=True).item())
-#     mesh = residuals_map.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(), cmap='RdBu_r', vmin=-vmax, vmax=vmax, add_colorbar=False)
+#     mesh = residuals_map.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), cmap='RdBu_r', vmin=-vmax, vmax=vmax, add_colorbar=False, levels=50)
     
 #     cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
 #     cbar.set_label(f'LOWESS fit residual ({cfg["units"]})', fontsize=10)
@@ -1015,7 +1033,7 @@ def plot_yearly_odsl_anomaly(obs_results, fig_dir):
     odsl_anomaly = obs_results['odsl_yearly']
     
     #symmetric color range for all subplots
-    vmax = float(odsl_anomaly.quantile(0.99))
+    vmax = odsl_anomaly.quantile(0.99, skipna=True).item()
     vmin = -vmax
 
     #dynamic subplot layout
@@ -1035,7 +1053,7 @@ def plot_yearly_odsl_anomaly(obs_results, fig_dir):
         data_for_year = odsl_anomaly.sel(year=year)
         
         #plot data
-        im = ax.pcolormesh(data_for_year.longitude, data_for_year.latitude, data_for_year, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=vmin, vmax=vmax)
+        im = data_for_year.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=vmin, vmax=vmax, levels=50, add_colorbar=False)
         
         ax.coastlines(linewidth=0.5)
         ax.set_global()
@@ -1045,10 +1063,12 @@ def plot_yearly_odsl_anomaly(obs_results, fig_dir):
     for j in range(num_years, len(axes)):
         axes[j].set_visible(False)
 
-    #layout
+    #formatting
     fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.15, hspace=0.15, wspace=0.05)
     cbar_ax = fig.add_axes([0.2, 0.08, 0.6, 0.015]) 
     cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', extend='both')
+    cbar.set_ticks(np.arange(np.ceil(vmin), np.floor(vmax) + 1))
+    cbar.set_ticks([], minor=True)
     cbar_label = (f'Observed ODSL Anomaly (mm)\n' f'(Color range from 99th percentile: {vmin:.1f} to {vmax:.1f} mm)')
     cbar.set_label(cbar_label, fontsize=11)
 
@@ -1057,7 +1077,8 @@ def plot_yearly_odsl_anomaly(obs_results, fig_dir):
     output_path = os.path.join(fig_dir, 'observed_odsl_yearly_anomaly.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Figure saved to {output_path}")
-    plt.show()
+    #plt.show()
+    plt.close(fig)
 
 def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
     """Visualizes the spatial patterns of the EOFs for each specified data source."""
@@ -1096,7 +1117,7 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
             mode_data = eofs.sel(mode=i)
             
             vmax = abs(mode_data).max()
-            mesh = ax.pcolormesh(mode_data.longitude, mode_data.latitude, mode_data, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-vmax, vmax=vmax)
+            mesh = ax.contourf(mode_data.longitude, mode_data.latitude, mode_data, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-vmax, vmax=vmax, levels=50)
             cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
             cbar.set_label('Amplitude')
             ax.set_title(f"EOF mode {i+1} ({variance.sel(mode=i).item()*100:.1f}% variance)")
@@ -1106,8 +1127,8 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
         
         output_path = os.path.join(fig_dir, f'spatial_eofs_{source_name}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.show()
-        #plt.close(fig)
+        #plt.show()
+        plt.close(fig)
 
 def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
     """Creates a scree plot and PC time series plot for each specified data source."""
@@ -1148,8 +1169,8 @@ def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
         
         output_path = os.path.join(fig_dir, f'scree_plot_and_pcs_{source_name}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.show()
-        #plt.close(fig)
+        #plt.show()
+        plt.close(fig)
 
 def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, mode_x=0, mode_y=1):
     """Creates a biplot of PCs and index correlations for each specified data source."""
@@ -1189,8 +1210,8 @@ def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, m
         
         output_path = os.path.join(fig_dir, f'correlation_biplot_{source_name}_pc{mode_x+1}_vs_pc{mode_y+1}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.show()
-        #plt.close(fig)
+        #plt.show()
+        plt.close(fig)
 
 def export_eof_results_to_csv(all_eof_results, all_correlation_results, fig_dir):
     """CSV file summarizing the results of the EOF analysis
@@ -1327,5 +1348,174 @@ def plot_eof_summary_table(all_eof_results, all_correlation_results, fig_dir):
     
     output_path = os.path.join(fig_dir, 'eof_summary_table.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.show()
-    #plt.close(fig)
+    #plt.show()
+    plt.close(fig)
+
+def plot_scatter_comparison(cmip_results, sliding_results, fig_dir):
+    """Generate a 2D density scatter plot comparing modeled vs. observed ODSL for each grid cell."""
+
+    cfg = PLOT_CONFIG[PLOT_VARIABLE]
+
+    print(f"Generating scatter plot for ODSL {cfg['name']}...")
+
+    if PLOT_VARIABLE == 'trend':
+        model_data = cmip_results['model_mean_trend']
+        obs_data = sliding_results['odsl_obs_dynamic']
+    else:
+        model_data = cmip_results['model_mean_variability']
+        obs_data = sliding_results['odsl_var_obs_regridded']
+
+    #flatten
+    obs_flat = obs_data.values.flatten()
+    model_flat = model_data.values.flatten()
+
+    #mask
+    valid_mask = ~np.isnan(obs_flat) & ~np.isnan(model_flat)
+    x_points = model_flat[valid_mask]
+    y_points = obs_flat[valid_mask]
+
+    #statistics
+    region_mask = create_region_mask(model_data, EXTENT)
+    stats_w = calculate_weighted_stats(model_data, region_mask, data_y=obs_data)
+    pcc_w = stats_w['pcc']
+    rmse_w = stats_w['rmse']
+
+    #linear regression
+    slope, intercept, r_value, _, _ = stats.linregress(x_points, y_points)
+    r_squared = r_value**2
+    normalized_std_dev = stats_w['std_x'] / stats_w['std_y']
+    num_points = len(x_points)
+
+    #plotting
+    fig, ax = plt.subplots(figsize=(9, 8))
+
+    abs_max = max(abs(np.nanmin(x_points)), abs(np.nanmax(x_points)), abs(np.nanmin(y_points)), abs(np.nanmax(y_points)))
+    lims = [-abs_max * 1.1, abs_max * 1.1]
+
+    #hexbin with logarithmic scale
+    hb = ax.hexbin(x_points, y_points, gridsize=100, cmap='inferno', norm=LogNorm(), extent=[lims[0], lims[1], lims[0], lims[1]])
+    
+    #colorbar
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.1)
+    cb = fig.colorbar(hb, cax=cax)
+    cb.set_label('Number of grid cells')
+
+    #axes limits
+    ax.set_xlim(lims)
+    ax.set_ylim(lims)
+
+    #lines
+    ax.plot(lims, lims, 'k--', linewidth=1, label='1:1 line', alpha=0.6)
+    ax.plot(x_points, slope * x_points + intercept, 'r-', linewidth=2, alpha=0.9, label=f'Best fit (y={slope:.2f}x + {intercept:.2f})')
+
+    #statistics
+    stats_text = (f"N = {num_points}\n" f"PCC = {pcc_w:.2f}\n" f"RMSE = {rmse_w:.2f} {cfg['units']}\n" f"R² = {r_squared:.2f}\n" f"Std Ratio = {normalized_std_dev:.2f}") 
+
+    #text box
+    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.8))
+
+    #formatting
+    ax.set_xlabel(f"Modeled ODSL {cfg['name']} ({cfg['units']})", fontsize=12)
+    ax.set_ylabel(f"Observed ODSL {cfg['name']} ({cfg['units']})", fontsize=12)
+    ax.set_title(f"Grid-cell comparison of ODSL {cfg['name']} ({START_YEAR}-{END_YEAR})", fontsize=14, fontweight='bold')
+    ax.legend(loc='lower right')
+    ax.grid(True, linestyle=':', alpha=0.6)
+    ax.set_aspect('equal', adjustable='box')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(fig_dir, f'scatter_comparison_{cfg["name"]}.png'), dpi=300)
+    #plt.show()
+    plt.close(fig)
+
+def plot_scatter_comparison_individual_models(cmip_results, sliding_results, fig_dir):
+    """Generate a grid of scatter plots, comparing each individual CMIP model to the observed ODSL for the common period."""
+
+    cfg = PLOT_CONFIG[PLOT_VARIABLE]
+
+    print(f"Generating individual model scatter plot grid for ODSL {cfg['name']}...")
+
+    if PLOT_VARIABLE == 'trend':
+        all_model_data = cmip_results['model_trend']
+        obs_data = sliding_results['odsl_obs_dynamic']
+    else:
+        all_model_data = cmip_results['model_variability']
+        obs_data = sliding_results['odsl_var_obs_regridded']
+
+    model_names = all_model_data.model.values
+    num_models = len(model_names)
+
+    #flatten
+    all_model_flat = all_model_data.values.flatten()
+    obs_flat_for_lims = obs_data.values.flatten()
+    all_points = np.concatenate([all_model_flat, obs_flat_for_lims])
+
+    #axes limits
+    plot_max = max(abs(np.nanmin(all_points)), abs(np.nanmax(all_points)))
+    lims = [-plot_max * 1.1, plot_max * 1.1]
+
+    #subplot grid
+    ncols = 4
+    nrows = (num_models + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 5, nrows * 4.5), sharex=True, sharey=True)
+    axes = axes.flatten()
+
+    #loop
+    for i, model_name in enumerate(model_names):
+        ax = axes[i]
+        model_data_single = all_model_data.sel(model=model_name)
+
+        #1D data arrays
+        obs_flat = obs_data.values.flatten()
+        model_flat = model_data_single.values.flatten()
+        valid_mask = ~np.isnan(obs_flat) & ~np.isnan(model_flat)
+        x_points = model_flat[valid_mask]
+        y_points = obs_flat[valid_mask]
+
+        #statistics
+        region_mask = create_region_mask(model_data_single, EXTENT)
+        stats_w = calculate_weighted_stats(model_data_single, region_mask, data_y=obs_data)
+        pcc_w = stats_w['pcc']
+        rmse_w = stats_w['rmse']
+
+        #linear regression
+        slope, intercept, r_value, _, _ = stats.linregress(x_points, y_points)
+        r_squared = r_value**2
+        normalized_std_dev = stats_w['std_x'] / stats_w['std_y']
+
+        #hexbin
+        hb = ax.hexbin(x_points, y_points, gridsize=100, cmap='inferno', norm=LogNorm(), extent=[lims[0], lims[1], lims[0], lims[1]])
+
+        #lines
+        ax.plot(lims, lims, 'k--', linewidth=1, alpha=0.6)
+        ax.plot(x_points, slope * x_points + intercept, 'r-', linewidth=2, alpha=0.9)
+
+        #statistics box
+        stats_text = (f"PCC = {pcc_w:.2f}\n" f"RMSE = {rmse_w:.2f}\n" f"R² = {r_squared:.2f}\n" f"Std ratio = {normalized_std_dev:.2f}\n" f"y = {slope:.2f}x + {intercept:.2f}")
+        ax.text(0.05, 0.92, stats_text, transform=ax.transAxes, fontsize=8, verticalalignment='top', bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.7))
+
+        ax.text(0.5, 0.97, model_name, transform=ax.transAxes, fontsize=11, fontweight='bold', ha='center', va='top')
+        ax.set_aspect('equal', adjustable='box')
+        ax.grid(True, linestyle=':', alpha=0.6)
+
+    #formatting
+    for j in range(num_models, len(axes)):
+        axes[j].set_visible(False)
+
+    #labels and title
+    fig.supxlabel(f"Modeled ODSL {cfg['name']} ({cfg['units']})", fontsize=14, y=0.05)
+    fig.supylabel(f"Observed ODSL {cfg['name']} ({cfg['units']})", fontsize=14, x=0.02)
+    fig.suptitle(f"Grid-cell comparison for individual CMIP models vs. observations ({cfg['name']})", fontsize=16, fontweight='bold', y=0.94)
+
+    fig.subplots_adjust(left=0.05, bottom=0.07, right=0.92, top=0.92, wspace=0.02, hspace=0.1)
+
+    #shared colorbar
+    pos_top_right = axes[ncols - 1].get_position()
+    pos_bottom = axes[num_models - 1].get_position()
+    cbar_ax = fig.add_axes([pos_top_right.x1 + 0.015, pos_bottom.y0, 0.02, pos_top_right.y1 - pos_bottom.y0])
+    fig.colorbar(hb, cax=cbar_ax, label='Number of grid cells')
+
+    plt.savefig(os.path.join(fig_dir, f'scatter_comparison_individual_models_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
+    #plt.show()
+    plt.close(fig)
+

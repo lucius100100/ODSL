@@ -20,6 +20,8 @@ import traceback
 from scipy import stats
 import statsmodels.api as sm
 from eofs.xarray import Eof
+from itertools import zip_longest
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 
 #correct configuration
 if CMIP_VERSION == 'CMIP5':
@@ -80,13 +82,27 @@ def calculate_observed_odsl():
     
     #calculate ODSL
     odsl_mm_yr = trend_sla_alt_mm_yr - trend_asl_fr_regridded_mm_yr - gia_regridded_mm_yr
-    
+
+    #weighted global mean removal
+    print("Removing global mean...")
+    def remove_global_mean(data_array):
+        weights = np.cos(np.deg2rad(data_array.latitude))
+        weights.name = "weights"
+        global_mean = data_array.weighted(weights).mean(dim=("latitude", "longitude")).item()
+        return data_array - global_mean
+
+    #apply
+    trend_sla_alt_mm_yr.name = 'MSL'
+    trend_asl_fr_regridded_mm_yr.name = 'Geoid'
+    gia_regridded_mm_yr.name = 'GIA'
+    odsl_mm_yr.name = 'ODSL'
+
+    trend_sla_alt_mm_yr = remove_global_mean(trend_sla_alt_mm_yr)
+    trend_asl_fr_regridded_mm_yr = remove_global_mean(trend_asl_fr_regridded_mm_yr)
+    gia_regridded_mm_yr = remove_global_mean(gia_regridded_mm_yr)
+    odsl_mm_yr = remove_global_mean(odsl_mm_yr)
+
     print(f"ODSL range: {odsl_mm_yr.min().item():.2f} to {odsl_mm_yr.max().item():.2f} mm/yr")
-    
-    #variability
-    sla_period = duacs_yearly.sla.sel(year=common_years)
-    detrended_sla = detrend_timeseries(sla_period, degree=VARIABILITY_DETREND_DEGREE, dim='year')
-    observed_variability = detrended_sla.std(dim='year')
 
     print("Calculating yearly ODSL fields...")
     
@@ -102,7 +118,11 @@ def calculate_observed_odsl():
     #subtract yearly budget and cumulative GIA
     odsl_yearly_fields = sla_yearly_mm - asl_yearly_regridded - gia_cumulative_signal
     
-    #anomaly from global mean
+    #variability
+    detrended_odsl = detrend_timeseries(odsl_yearly_fields, degree=VARIABILITY_DETREND_DEGREE, dim='year')
+    observed_variability = detrended_odsl.std(dim='year') / 10    #mm -> cm
+
+    #anomaly from global mean for overview figure
     temporal_mean = odsl_yearly_fields.mean(dim='year')
     odsl_yearly_anomaly = odsl_yearly_fields - temporal_mean
     
@@ -132,6 +152,62 @@ def calculate_observed_odsl():
     output_ds.attrs['common_years_list'] = common_years.tolist() 
 
     return output_ds
+
+@cache_result('valid_models_table')
+def valid_models_table():
+    """Finds all valid CMIP5 and CMIP6 models that have the required historical and future scenario files and displays them in a table."""
+
+    def create_availability_df(cmip_version, target_models, scenarios_dict):
+        """Helper function to generate an availability DataFrame for a given CMIP version."""
+        
+        print(f"\n Scanning {cmip_version} model availability...")
+        inventory = get_cmip_files_inventory(cmip_version)
+        all_files = inventory['all_files']
+
+        #historical
+        models_with_historical = set(all_files.get('historical', {}).keys())
+        
+        #future scenarios
+        future_scenarios = [s for s in scenarios_dict if s != 'historical']
+
+        results_data = []
+        
+        #check each model
+        for model in sorted(target_models):
+            row = {'Model': model}
+            
+            #historical
+            has_historical = model in models_with_historical
+            row['historical'] = has_historical
+            
+            #future scenario
+            for scenario in future_scenarios:
+                models_with_future_scenario = set(all_files.get(scenario, {}).keys())
+                
+                #both historical and future scenario only
+                row[scenario] = has_historical and (model in models_with_future_scenario)
+            
+            results_data.append(row)
+            
+        #DataFrame
+        df = pd.DataFrame(results_data)
+        return df.set_index('Model')
+
+    #CMIP5
+    df_cmip5 = create_availability_df('CMIP5', TARGET_CMIP5_MODELS, CMIP_SCENARIOS['CMIP5'])
+
+    #CMIP6
+    df_cmip6 = create_availability_df('CMIP6', TARGET_CMIP6_MODELS, CMIP_SCENARIOS['CMIP6'])
+
+    #combine DataFrames
+    combined_df = pd.concat(
+        [df_cmip5, df_cmip6], 
+        keys=['CMIP5', 'CMIP6'], 
+        names=['CMIP_Version', 'Model']
+    )
+    
+    print("\nScan complete, returning combined availability table...")
+    return combined_df
 
 @cache_result('processed_CMIP_models')
 def process_cmip_models():
@@ -654,41 +730,64 @@ def correlate_with_indices(all_eof_results):
 def main():
     """Run complete analysis."""
 
-    print("ODSL analysis...")
+    print("ODSL analysis starting...")
     fig_dir = './figures/'
 
-    #observed ODSL
-    obs_results = calculate_observed_odsl()
-    print(f"Observed ODSL range: {obs_results['odsl'].min().item():.2f} to {obs_results['odsl'].max().item():.2f} mm/yr")
-    print("Completed observed ODSL calculation.")
-    
-    #steric record
-    #steric_comparison = compare_with_steric_record()
-    #print("Completed steric record comparison.")
-    
-    #CMIP models
-    cmip_results = process_cmip_models()
-    print(f"Processed {cmip_results.attrs['valid_models_count']} CMIP models")
+    #progress bar
+    progress_columns = [SpinnerColumn(), TextColumn("[progress.description]{task.description}"), BarColumn(), TextColumn("[progress.percentage]{task.percentage:>3.0f}%"), TimeElapsedColumn()]
 
-    #sliding window analysis
-    sliding_results = perform_sliding_window_analysis()
-    print("Completed sliding window analysis")
+    with Progress(*progress_columns) as progress:
 
-    scenario_results = process_cmip_scenario_data()
-    print("Completed scenario data processing")
+        total_steps = 8
+        task_id = progress.add_task("[cyan]Overall Progress", total=total_steps)
 
-    # lowess_results = calculate_lowess_fit()
-    # print("Completed LOWESS fit calculation")
+        #observed ODSL
+        obs_results = calculate_observed_odsl()
+        progress.console.print(f"Observed ODSL range: {obs_results['odsl'].min().item():.2f} to {obs_results['odsl'].max().item():.2f} mm/yr")
+        progress.console.print("[green]✔ Completed observed ODSL calculation.[/green]")
+        progress.update(task_id, description="[bold blue]Step 2/8:[/bold blue] Finding valid CMIP models", advance=1)
+        
+        #steric record
+        #steric_comparison = compare_with_steric_record()
+        #print("Completed steric record comparison.")
+        
+        #valid CMIP models
+        models_df = valid_models_table()
+        progress.console.print(models_df)
+        progress.update(task_id, description="[bold blue]Step 3/8:[/bold blue] Processing CMIP models", advance=1)
 
-    eof_results = perform_eof_analysis(obs_results, cmip_results, n_modes=EOF_N_MODES)
-    correlation_results = correlate_with_indices(eof_results)
-    print("Completed EOF analysis.")
+        #CMIP models
+        cmip_results = process_cmip_models()
+        progress.console.print(f"Processed {cmip_results.attrs['valid_models_count']} CMIP models")
+        progress.update(task_id, description="[bold blue]Step 4/8:[/bold blue] Performing sliding window analysis", advance=1)
 
-    print("\nAll calculations complete. Generating figures...")
+        #sliding window analysis
+        sliding_results = perform_sliding_window_analysis()
+        progress.console.print("[green]✔ Completed sliding window analysis.[/green]")
+        progress.update(task_id, description="[bold blue]Step 5/8:[/bold blue] Processing scenario data", advance=1)
 
-    #figures
-    create_all_figures(obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, eof_results=eof_results, correlation_results=correlation_results, fig_dir=fig_dir)
-    print("All figures generated!")
+        #scenario data
+        scenario_results = process_cmip_scenario_data()
+        progress.console.print("[green]✔ Completed scenario data processing.[/green]")
+        progress.update(task_id, description="[bold blue]Step 6/8:[/bold blue] EOF analysis", advance=1)
+
+        # lowess_results = calculate_lowess_fit()
+        # print("Completed LOWESS fit calculation")
+
+        #EOF analysis
+        eof_results = perform_eof_analysis(obs_results, cmip_results, n_modes=EOF_N_MODES)
+        progress.update(task_id, description="[bold blue]Step 7/8:[/bold blue] Correlating with climate indices", advance=1)
+
+        #EOF correlation with indices
+        correlation_results = correlate_with_indices(eof_results)
+        progress.console.print("[green]✔ Completed EOF analysis and correlations.[/green]")
+        progress.update(task_id, description="[bold blue]Step 8/8:[/bold blue] Generating all figures", advance=1)
+
+        #figures
+        progress.console.print("\nAll calculations complete. Generating figures...")
+        create_all_figures(obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, eof_results=eof_results, correlation_results=correlation_results, fig_dir=fig_dir)
+        progress.console.print("[bold green]✔ All figures generated![/bold green]")
+        progress.update(task_id, description="[bold green]Analysis Complete!", advance=1)
 
 if __name__ == "__main__":
     main()

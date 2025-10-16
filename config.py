@@ -5,10 +5,10 @@ Configuration file for ODSL analysis and plotting.
 """
 
 #parameters
-CMIP_VERSION               = 'CMIP6'           #CMIP version to be used: 'CMIP5' or 'CMIP6'
+CMIP_VERSION               = 'CMIP5'           #CMIP version to be used: 'CMIP5' or 'CMIP6'
 START_YEAR                 = 1993              #observed period
 END_YEAR                   = 2023
-#EXTENT                     = [-65, 40, 50, 80] #North Atlantic
+#EXTENT                     = [-65, 40, 50, 80] #North Atlantic (Richter et al., 2017)
 EXTENT                     = [-100, 20, 8, 80] #North Atlantic
 USE_CACHE                  = True              #cache settings
 FORCE_RECOMPUTE            = False
@@ -21,12 +21,12 @@ EOF_N_MODES                = 3                 #number of EOF modes to compute
 
 PLOT_CONFIG = {
     'trend': {
-        'name': 'trend',
+        'name': 'Trend',
         'units': 'mm/yr',
         'cmap': 'coolwarm'
     },
     'variability': {
-        'name': 'variability',
+        'name': 'Variability',
         'units': 'cm',
         'cmap': 'viridis'
     }
@@ -60,60 +60,60 @@ CMIP_SCENARIOS = {
 }
 
 #target models from supplementary material table 1 Richter et al. 2017
-TARGET_CMIP5_MODELS = [
-    "ACCESS1-0",
-    "bcc-csm1-1",
-    "CanESM2",
-    "CCSM4",
-    "CMCC-CMS",
-    "CNRM-CM5",
-    "CSIRO-Mk3-6-0",
-    "GFDL-ESM2G",
-    "GFDL-ESM2M",
-    "HadGEM2-CC",
-    "HadGEM2-ES",
-    "inmcm4",
-    "IPSL-CM5A-MR",
-    "MIROC-ESM",
-    "MPI-ESM-LR",
-    "MRI-CGCM3",
-    "NorESM1-M",
-    "NorESM1-ME"
-]
-
-#all target models CMIP5 (historical)
 # TARGET_CMIP5_MODELS = [
 #     "ACCESS1-0",
 #     "bcc-csm1-1",
-#     "bcc-csm1-1-m",
 #     "CanESM2",
 #     "CCSM4",
-#     "CMCC-CESM",
-#     "CMCC-CM",
 #     "CMCC-CMS",
 #     "CNRM-CM5",
 #     "CSIRO-Mk3-6-0",
-#     "EC-EARTH",
-#     "GFDL-CM3",
 #     "GFDL-ESM2G",
 #     "GFDL-ESM2M",
-#     "GISS-E2-R",
-#     "GISS-E2-R-CC",
 #     "HadGEM2-CC",
 #     "HadGEM2-ES",
 #     "inmcm4",
-#     "IPSL-CM5A-LR",
 #     "IPSL-CM5A-MR",
-#     "IPSL-CM5B-LR",
 #     "MIROC-ESM",
-#     "MIROC-ESM-CHEM",
-#     "MIROC5",
 #     "MPI-ESM-LR",
-#     "MPI-ESM-MR",
 #     "MRI-CGCM3",
 #     "NorESM1-M",
 #     "NorESM1-ME"
 # ]
+
+#all target models CMIP5 (historical)
+TARGET_CMIP5_MODELS = [
+    "ACCESS1-0",
+    "bcc-csm1-1",
+    "bcc-csm1-1-m",
+    "CanESM2",
+    "CCSM4",
+    "CMCC-CESM",
+    "CMCC-CM",
+    "CMCC-CMS",
+    "CNRM-CM5",
+    "CSIRO-Mk3-6-0",
+    "EC-EARTH",
+    "GFDL-CM3",
+    "GFDL-ESM2G",
+    "GFDL-ESM2M",
+    "GISS-E2-R",
+    "GISS-E2-R-CC",
+    "HadGEM2-CC",
+    "HadGEM2-ES",
+    "inmcm4",
+    "IPSL-CM5A-LR",
+    "IPSL-CM5A-MR",
+    "IPSL-CM5B-LR",
+    "MIROC5",
+    "MIROC-ESM",
+    "MIROC-ESM-CHEM",
+    "MPI-ESM-LR",
+    "MPI-ESM-MR",
+    "MRI-CGCM3",
+    "NorESM1-M",
+    "NorESM1-ME"
+]
 
 #all target models CMIP6 (historical)
 TARGET_CMIP6_MODELS = [

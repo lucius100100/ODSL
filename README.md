@@ -109,8 +109,8 @@ ODSL/
 ## Cache Size
 
 Total cache size: ~5-10 GB
-First run: 20-45 minutes
-Cached runs: <1 minute
+First run: 30-60 minutes
+Cached runs: 1-5 minutes
 
 ## License
 
@@ -165,6 +165,6 @@ If you use this code in your research, please cite:
 
 ## Contact
 
-Luc van Dijk - <l.g.vandijk1@students.uu.nl> ; <luc.van.dijk@knmi.nl>
+Luc van Dijk - <l.g.vandijk1@students.uu.nl> ; <luc.van.dijk@knmi.nl> ; <luciusvandijk@gmail.com>
 
 Project Link: [https://github.com/lucius100100/ODSL](https://github.com/lucius100100/ODSL)

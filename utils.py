@@ -15,6 +15,9 @@ import config
 import os
 import sys
 from eofs.xarray import Eof
+import matplotlib.path as mpath
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 
 def setup_esmf_environment():
     """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported. See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
@@ -107,7 +110,7 @@ def cache_result(cache_key_prefix):
                     #json
                     elif isinstance(result, (dict, list)):
                         print(f"Caching result as JSON to: {json_path}")
-                        json_result = _convert_for_json(result)
+                        json_result = convert_for_json(result)
                         with open(json_path, 'w') as f:
                             json.dump(json_result, f, indent=2)
                     
@@ -124,13 +127,13 @@ def cache_result(cache_key_prefix):
         return wrapper
     return decorator
 
-def _convert_for_json(obj):
+def convert_for_json(obj):
     """Convert numpy types and other non-JSON-serializable objects to JSON-compatible types"""
 
     if isinstance(obj, dict):
-        return {key: _convert_for_json(value) for key, value in obj.items()}
+        return {key: convert_for_json(value) for key, value in obj.items()}
     elif isinstance(obj, list):
-        return [_convert_for_json(item) for item in obj]
+        return [convert_for_json(item) for item in obj]
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, (np.integer, np.floating)):
@@ -150,6 +153,29 @@ def rotate_longitude(ds, name_lon):
     ds_copy = ds_copy.assign_coords({name_lon: new_lon_values})
 
     return ds_copy.sortby(ds_copy[name_lon])
+
+def add_map_features(ax, extent, is_left=False, is_bottom=False):
+    """Add standard map features to axis."""
+
+    lon_min, lon_max, lat_min, lat_max = extent
+    boundary_path = mpath.Path([[lon_min, lat_min], [lon_max, lat_min], [lon_max, lat_max], [lon_min, lat_max], [lon_min, lat_min]]).interpolated(50)
+    
+    proj_to_data = ccrs.PlateCarree()._as_mpl_transform(ax) - ax.transData
+    boundary_in_proj_coords = proj_to_data.transform_path(boundary_path)
+    ax.set_boundary(boundary_in_proj_coords)
+    
+    verts = boundary_in_proj_coords.vertices
+    ax.set_xlim(verts[:, 0].min(), verts[:, 0].max())
+    ax.set_ylim(verts[:, 1].min(), verts[:, 1].max())
+    
+    ax.add_feature(cfeature.LAND, color='lightgray', zorder=1)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
+    
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='-')
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.left_labels = is_left
+    gl.bottom_labels = is_bottom
 
 def calculate_weighted_stats(data_x, mask, data_y=None):
     """Calculates area-weighted statistics based on the supplementary material 'Computation of metrics used in the analysis' from Richter et al. 2017."""
