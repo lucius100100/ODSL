@@ -320,6 +320,37 @@ def load_amo_index():
     except Exception as e:
         print(f"An error occurred while loading the AMO index: {e}")
         return None
+    
+@cache_result('eap_index_yearly')
+def load_eap_index():
+    """Loads the EAP index from the provided text file, skips the header, and computes annual averages."""
+    
+    print("Loading EAP index data...")
+
+    try:
+        modes_dir = find_folder_by_name("Modes")
+        eap_file_path = os.path.join(modes_dir, "EAP", "EAP_monthly.txt")
+
+        #load
+        df = pd.read_csv(eap_file_path, skiprows=9, header=None, sep=r'\s+', names=['year', 'month', 'ssta'])
+
+        #annual mean SSTA
+        yearly_eap = df.groupby('year')['ssta'].mean().reset_index()
+
+        #xarray DataArray
+        eap_da = xr.DataArray(data=yearly_eap['ssta'].values, coords={'year': yearly_eap['year'].values}, dims=['year'],name='eap_index').rename({'year': 'time'})
+        eap_da['time'] = eap_da['time'].astype(int)
+        
+        print(f"Loaded EAP index from {yearly_eap['year'].min()} to {yearly_eap['year'].max()}")
+
+        return eap_da.to_dataset(name='eap_index')
+
+    except FileNotFoundError:
+        print("Warning: EAP_monthly.txt not found in the expected Modes/EAP directory.")
+        return None
+    except Exception as e:
+        print(f"An error occurred while loading the EAP index: {e}")
+        return None
 
 @cache_result('nao_index_yearly')
 def load_nao_index():
@@ -351,13 +382,47 @@ def load_nao_index():
         print(f"An error occurred while loading the NAO index: {e}")
         return None
     
+@cache_result('ao_index_yearly')
+def load_ao_index():
+    """Loads the monthly AO index from the provided text file, handles its specific multi-column format, and computes annual averages."""
+
+    print("Loading AO index data...")
+
+    try:
+        modes_dir = find_folder_by_name("Modes")
+        ao_file_path = os.path.join(modes_dir, "AO", "AO_monthly.txt")
+
+        #load
+        df = pd.read_csv(ao_file_path, header=0, sep=r'\s+', index_col=0)
+
+        yearly_ao = df.mean(axis=1)
+        yearly_ao.name = 'ao_index'
+        ao_da = yearly_ao.to_xarray()
+        ao_da = ao_da.rename({'index': 'time'})
+        ao_da['time'] = ao_da['time'].astype(int)
+
+        print(f"Loaded AO index from {int(ao_da.time.min().item())} to {int(ao_da.time.max().item())}")
+
+        return ao_da.to_dataset(name='ao_index')
+
+    except FileNotFoundError:
+        print("Warning: AO_monthly.txt not found in the expected Modes/AO directory.")
+        return None
+    except Exception as e:
+        print(f"An error occurred while loading the AO index: {e}")
+        return None
+
 def load_climate_indices_dict():
     """Load all climate indices into a dictionary."""
 
     nao_ds = load_nao_index()
+    ao_ds = load_ao_index()
     amo_ds = load_amo_index()
+    eap_ds = load_eap_index()
     
     return {
         'nao': nao_ds['nao_index'] if nao_ds is not None else None,
-        'amo': amo_ds['amo_index'] if amo_ds is not None else None
+        'ao': ao_ds['ao_index'] if ao_ds is not None else None,
+        'amo': amo_ds['amo_index'] if amo_ds is not None else None,
+        'eap': eap_ds['eap_index'] if eap_ds is not None else None
     }

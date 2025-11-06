@@ -5,7 +5,7 @@ Plotting functions for ODSL analysis.
 """
 
 from utils import calculate_weighted_stats, create_region_mask, add_map_features
-from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG)
+from config import (START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG, EOF_N_MODES)
 
 import numpy as np
 import xarray as xr
@@ -44,29 +44,24 @@ def create_all_figures(obs_results, cmip_results, sliding_results, scenario_resu
     print(f"\nGenerating figures for {PLOT_VARIABLE.upper()}")
     print(f"Figures will be saved in: {fig_dir}")
 
-    plot_scatter_comparison_individual_models(cmip_results, sliding_results, variable_fig_dir)
-    plot_scatter_comparison(cmip_results, sliding_results, variable_fig_dir)
     #plot_yearly_odsl_anomaly(obs_results, fig_dir)
+
+    plot_eof_summary_table(eof_results, correlation_results, eof_fig_dir)
+    export_eof_results_to_csv(eof_results, correlation_results, eof_fig_dir)
+    plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
+    plot_scree_and_pcs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
+    plot_correlation_biplot(eof_results, correlation_results, eof_fig_dir, mode_x=0, mode_y=1)
+    #plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, variable_fig_dir)
+    #plot_lowess_fit(lowess_results_df, variable_fig_dir)
+    plot_scenario_comparison(scenario_results, fig_dir)
 
     if PLOT_VARIABLE == 'trend':
         plot_observed_odsl_components(obs_results, variable_fig_dir)
     elif PLOT_VARIABLE == 'variability':
         plot_observed_variability(obs_results, variable_fig_dir)
 
-    plot_eof_summary_table(eof_results, correlation_results, eof_fig_dir)
-    export_eof_results_to_csv(eof_results, correlation_results, eof_fig_dir)
-    plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=3)
-    plot_scree_and_pcs(eof_results, eof_fig_dir, num_modes_to_plot=3)
-    plot_correlation_biplot(eof_results, correlation_results, eof_fig_dir, mode_x=0, mode_y=1)
-    #plot_lowess_residuals_spatially(sliding_results, cmip_results, lowess_results_df, variable_fig_dir)
-    #plot_lowess_fit(lowess_results_df, variable_fig_dir)
-    plot_scenario_comparison(scenario_results, fig_dir)
-
-    # if PLOT_VARIABLE == 'trend':
-    #     plot_observed_odsl_components(obs_results, variable_fig_dir)
-    # elif PLOT_VARIABLE == 'variability':
-    #     plot_observed_variability(obs_results, variable_fig_dir)
-
+    plot_scatter_comparison_individual_models(cmip_results, sliding_results, variable_fig_dir)
+    plot_scatter_comparison(cmip_results, sliding_results, variable_fig_dir)
     plot_cmip_multimodel_mean(cmip_results, variable_fig_dir)
     plot_observed_vs_modeled(cmip_results, sliding_results, variable_fig_dir)
     plot_sliding_window_timeseries(sliding_results, variable_fig_dir)
@@ -1102,13 +1097,15 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
         )
 
         #plot
-        fig, axes = plt.subplots(
-            nrows=num_modes_to_plot,
-            figsize=(7, 5 * num_modes_to_plot),
-            subplot_kw={'projection': proj}
-        )
+        fig, axes = plt.subplots(nrows=num_modes_to_plot, figsize=(7, 5 * num_modes_to_plot), subplot_kw={'projection': proj})
 
-        if num_modes_to_plot == 1: axes = [axes]
+        if num_modes_to_plot == 1: 
+            axes = [axes]
+
+        global_vmax = 0
+        for i in range(num_modes_to_plot):
+            mode_data = eofs.sel(mode=i)
+            global_vmax = max(global_vmax, abs(mode_data).max().item())
 
         for i in range(num_modes_to_plot):
             ax = axes[i]
@@ -1117,13 +1114,16 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
             mode_data = eofs.sel(mode=i)
             
             vmax = abs(mode_data).max()
-            mesh = ax.contourf(mode_data.longitude, mode_data.latitude, mode_data, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-vmax, vmax=vmax, levels=50)
-            cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
-            cbar.set_label('Amplitude')
+            mesh = ax.contourf(mode_data.longitude, mode_data.latitude, mode_data, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-global_vmax, vmax=global_vmax, levels=50)
             ax.set_title(f"EOF mode {i+1} ({variance.sel(mode=i).item()*100:.1f}% variance)")
 
         fig.suptitle(f'Spatial EOF patterns for {source_name.upper()}', fontsize=16, fontweight='bold')
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+        #shared colorbar
+        cbar = fig.colorbar(mesh, ax=axes, orientation='vertical', shrink=0.8, pad=0.02)
+        cbar.set_label('Amplitude')
+
+        plt.tight_layout(rect=[0, 0, 0.88, 0.96])
         
         output_path = os.path.join(fig_dir, f'spatial_eofs_{source_name}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -1141,6 +1141,7 @@ def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
             continue
 
         print(f"Generating scree and PC plot for: {source_name}")
+        
         eof_results = all_eof_results[source_name]
         variance = eof_results['variance_fractions']
         pcs = eof_results['pcs']
@@ -1149,22 +1150,26 @@ def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [1, 2]})
 
         ax1.bar(variance.mode.values + 1, variance.values * 100)
-        ax1.set_title('Scree Plot: Variance Explained by Each Mode')
-        ax1.set_xlabel('Mode Number')
-        ax1.set_ylabel('Variance Explained (%)')
+        ax1.set_title('Scree plot: variance explained by each mode')
+        ax1.set_xlabel('Mode number')
+        ax1.set_ylabel('Variance explained (%)')
         ax1.set_xticks(variance.mode.values + 1)
         ax1.grid(axis='y', linestyle='--', alpha=0.7)
 
+        linestyles = ['-', '--', ':', '-.'] 
+
         for i in range(num_modes_to_plot):
-            ax2.plot(pcs.time.values, pcs.sel(mode=i), label=f'PC {i+1}')
+            style = linestyles[i % len(linestyles)]
+            ax2.plot(pcs.time.values, pcs.sel(mode=i), label=f'PC {i+1}', linestyle=style)
             
-        ax2.set_title('Principal Component (PC) Time Series')
+        ax2.set_title('PC time series')
         ax2.set_xlabel('Year')
-        ax2.set_ylabel('Standardized Amplitude')
+        ax2.set_ylabel('Standardized amplitude')
         ax2.legend()
         ax2.grid(True, linestyle='--', alpha=0.7)
         
         fig.suptitle(f'EOF Analysis for {source_name.upper()}', fontsize=16, fontweight='bold')
+        
         plt.tight_layout()
         
         output_path = os.path.join(fig_dir, f'scree_plot_and_pcs_{source_name}.png')
@@ -1202,20 +1207,21 @@ def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, m
             ax.text(corr_x * 1.15, corr_y * 1.15, index_name.upper(), color='red', fontweight='bold', ha='center', va='center')
 
         ax.axhline(0, color='grey', linestyle='--'); ax.axvline(0, color='grey', linestyle='--')
-        ax.set_xlabel(f'PC {mode_x + 1} Amplitude')
-        ax.set_ylabel(f'PC {mode_y + 1} Amplitude')
+        ax.set_xlabel(f'PC {mode_x + 1} amplitude')
+        ax.set_ylabel(f'PC {mode_y + 1} amplitude')
         ax.set_title(f'Biplot for {source_name.upper()} (PC{mode_x+1} vs. PC{mode_y+1})')
         ax.grid(True)
         ax.legend()
         
+        plt.tight_layout()
+
         output_path = os.path.join(fig_dir, f'correlation_biplot_{source_name}_pc{mode_x+1}_vs_pc{mode_y+1}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close(fig)
 
 def export_eof_results_to_csv(all_eof_results, all_correlation_results, fig_dir):
-    """CSV file summarizing the results of the EOF analysis
-    for all data sources."""
+    """CSV file summarizing the results of the EOF analysis for all data sources."""
 
     print("Exporting full EOF analysis results to CSV...")
     
@@ -1239,11 +1245,11 @@ def export_eof_results_to_csv(all_eof_results, all_correlation_results, fig_dir)
             row_data = {
                 'Source': source_name,
                 'Mode': mode + 1,
-                'Variance Fraction (%)': eof_res['variance_fractions'].sel(mode=mode).item() * 100
+                'Variance fraction (%)': eof_res['variance_fractions'].sel(mode=mode).item() * 100
             }
             
             for index_name in index_names:
-                col_name = f'{index_name.upper()} Correlation'
+                col_name = f'{index_name.upper()} correlation'
                 if index_name in corr_res:
                     row_data[col_name] = corr_res[index_name].sel(mode=mode).item()
                 else:
@@ -1343,8 +1349,8 @@ def plot_eof_summary_table(all_eof_results, all_correlation_results, fig_dir):
                 if abs(val) > 0.6:
                     cell.get_text().set_color('white')
 
-    fig.suptitle('EOF Analysis Summary: Variance and Index Correlations', fontsize=16, fontweight='bold')
-    plt.tight_layout(pad=1.5)
+    fig.suptitle('EOF variance and index correlations', fontsize=16, fontweight='bold')
+    plt.tight_layout()
     
     output_path = os.path.join(fig_dir, 'eof_summary_table.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')

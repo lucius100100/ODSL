@@ -5,7 +5,7 @@ Execute the full ODSL calculations / analysis and plotting.
 """
 
 from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name, load_amo_index, load_nao_index, load_climate_indices_dict)
-from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries, calculate_single_eof, calculate_pc_index_correlations)
+from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries, calculate_pc_index_correlations)
 from plotting import create_all_figures 
 from config import (CMIP_VERSION, START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO, EOF_N_MODES)
 
@@ -446,114 +446,6 @@ def perform_sliding_window_analysis():
 
     return output_ds
 
-# @cache_result('steric_comparison')
-# def compare_with_steric_record():
-#     """Compare global mean removed ODSL with steric record."""
-#     print("\nComparing with steric record...")
-    
-#     #observed ODSL
-#     obs_results = calculate_observed_odsl()
-#     odsl_mm_yr = obs_results['odsl']
-    
-#     common_years = np.array(obs_results.attrs['common_years_list'])
-    
-#     #global mean of ODSL
-#     weights = np.cos(np.deg2rad(odsl_mm_yr.latitude))
-#     global_mean_odsl = odsl_mm_yr.weighted(weights).mean(dim=("latitude", "longitude")).item()
-    
-#     print(f"\nGlobal mean ODSL trend: {global_mean_odsl:.3f} mm/yr")
-    
-#     #remove global mean
-#     odsl_global_mean_removed = odsl_mm_yr - global_mean_odsl
-    
-#     #regional mean after removing global mean
-#     region_mask = create_region_mask(odsl_mm_yr, EXTENT)
-#     regional_stats_original = calculate_weighted_stats(odsl_mm_yr, region_mask)
-#     regional_stats_detrended = calculate_weighted_stats(odsl_global_mean_removed, region_mask)
-    
-#     #steric record
-#     try:
-        
-#         #excel
-#         budget_dir = find_folder_by_name("Budget")
-#         frederikse_dir = os.path.join(budget_dir, "Frederikse")
-#         excel_path = os.path.join(frederikse_dir, "global_basin_timeseries.xlsx")
-#         df_steric = pd.read_excel(excel_path, sheet_name='Global')
-        
-#         #filter for common years and reset index
-#         steric_data = df_steric[df_steric['Year'].isin(common_years)][['Year', 'Steric [mean]']].copy()
-#         steric_data = steric_data.reset_index(drop=True)
-        
-#         #steric trend
-#         slope, intercept, r_value, p_value, std_err = stats.linregress(
-#             steric_data['Year'], 
-#             steric_data['Steric [mean]']
-#         )
-#         steric_trend_mm_yr = slope 
-        
-#         print(f"\nSteric trend ({common_years.min()}-{common_years.max()}): {steric_trend_mm_yr:.3f} mm/yr")
-        
-#         #comparison table
-#         print("\n" + "="*60)
-#         print("COMPARISON TABLE: ODSL vs Steric Record")
-#         print("="*60)
-#         print(f"Analysis period: {common_years.min()}-{common_years.max()}")
-#         print(f"Region: North Atlantic ({EXTENT[0]}°E to {EXTENT[1]}°E, {EXTENT[2]}°N to {EXTENT[3]}°N)")
-#         print("-"*60)
-        
-#         print("\nGLOBAL TRENDS:")
-#         print(f"Global mean ODSL:           {global_mean_odsl:6.3f} mm/yr")
-#         print(f"Global steric (Frederikse):  {steric_trend_mm_yr:6.3f} mm/yr")
-#         print(f"Difference:                 {global_mean_odsl - steric_trend_mm_yr:6.3f} mm/yr")
-        
-#         print("\nREGIONAL NORTH ATLANTIC TRENDS:")
-#         print(f"Original ODSL:              {regional_stats_original['mean_x']:6.3f} mm/yr")
-#         print(f"ODSL (global mean removed):  {regional_stats_detrended['mean_x']:6.3f} mm/yr")
-#         print(f"Change after detrending:     {regional_stats_detrended['mean_x'] - regional_stats_original['mean_x']:6.3f} mm/yr")
-        
-#         print("\nYEAR-BY-YEAR STERIC DATA:")
-#         print("-"*40)
-#         print("Year  | Steric [mm] | Annual Change [mm]")
-#         print("-"*40)
-        
-#         for idx in range(len(steric_data)):
-#             year = steric_data.loc[idx, 'Year']
-#             steric_value = steric_data.loc[idx, 'Steric [mean]']
-            
-#             if idx > 0:
-#                 annual_change = steric_value - steric_data.loc[idx-1, 'Steric [mean]']
-#                 print(f"{int(year)} | {steric_value:11.2f} | {annual_change:17.2f}")
-#             else:
-#                 print(f"{int(year)} | {steric_value:11.2f} | {'N/A':>17}")
-        
-#         print("-"*40)
-        
-#         #summary statistics
-#         total_change = steric_data['Steric [mean]'].iloc[-1] - steric_data['Steric [mean]'].iloc[0]
-#         n_years = len(steric_data) - 1
-        
-#         print(f"Total change: {total_change:.2f} mm")
-#         print(f"Average annual change: {total_change/n_years:.3f} mm/yr")
-#         print(f"Linear trend (from regression): {steric_trend_mm_yr:.3f} mm/yr")
-        
-#         #ODSL without global mean to steric
-#         print(f"\nCOMPARISON CHECK:")
-#         print(f"Global mean ODSL trend: {global_mean_odsl:.3f} mm/yr")
-#         print(f"Global steric trend: {steric_trend_mm_yr:.3f} mm/yr")
-#         print(f"Ratio (ODSL/Steric): {global_mean_odsl/steric_trend_mm_yr:.3f}")
-        
-#         print("="*60)
-        
-#     except Exception as e:
-#         print(f"Error loading steric record: {e}")
-#         print("Please ensure the Excel file exists at the expected location")
-#         traceback.print_exc()
-    
-#     return {
-#         'global_mean_odsl': global_mean_odsl,
-#         'odsl_detrended': odsl_global_mean_removed
-#     }
-
 @cache_result('cmip_scenario_timeseries_results')
 def process_cmip_scenario_data():
     """Process CMIP data to get ensemble timeseries for each scenario."""
@@ -663,8 +555,30 @@ def process_cmip_scenario_data():
 #     print("LOWESS fit calculation complete.")
 #     return combined_df
 
+@cache_result('single_eof_result')
+def calculate_single_eof(data_array, n_modes=EOF_N_MODES):
+    """Helper function to perform EOF analysis on a single DataArray."""
+
+    if data_array.time.size < n_modes:
+        print(f"Skipping EOF; not enough time steps ({data_array.time.size})")
+        return None
+        
+    coslat = np.cos(np.deg2rad(data_array['latitude'].values))
+    weights = np.sqrt(coslat)[..., np.newaxis]
+    solver = Eof(data_array, weights=weights)
+    
+    eofs = solver.eofs(neofs=n_modes)
+    pcs = solver.pcs(npcs=n_modes, pcscaling=1)
+    variance_fractions = solver.varianceFraction(neigs=n_modes)
+    
+    return xr.Dataset({
+        'eofs': eofs,
+        'pcs': pcs,
+        'variance_fractions': variance_fractions
+    })
+
 @cache_result('eof_analysis_results')
-def perform_eof_analysis(obs_results, cmip_results, n_modes=3):
+def perform_eof_analysis(obs_results, cmip_results, n_modes=EOF_N_MODES):
     """Performs EOF analysis on observed data, the multi-model mean, and each individual CMIP model."""
     
     print("\nPerforming EOF analysis on all data sources...")
@@ -738,18 +652,15 @@ def main():
 
     with Progress(*progress_columns) as progress:
 
-        total_steps = 8
-        task_id = progress.add_task("[cyan]Overall Progress", total=total_steps)
+        total_steps = 9
+        task_id = progress.add_task("[cyan]Overall progress", total=total_steps)
 
         #observed ODSL
+        progress.update(task_id, description="[bold blue]Step 1/8:[/bold blue] Calculating the observed ODSL", advance=1)
         obs_results = calculate_observed_odsl()
         progress.console.print(f"Observed ODSL range: {obs_results['odsl'].min().item():.2f} to {obs_results['odsl'].max().item():.2f} mm/yr")
         progress.console.print("[green]✔ Completed observed ODSL calculation.[/green]")
         progress.update(task_id, description="[bold blue]Step 2/8:[/bold blue] Finding valid CMIP models", advance=1)
-        
-        #steric record
-        #steric_comparison = compare_with_steric_record()
-        #print("Completed steric record comparison.")
         
         #valid CMIP models
         models_df = valid_models_table()
@@ -787,7 +698,7 @@ def main():
         progress.console.print("\nAll calculations complete. Generating figures...")
         create_all_figures(obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, eof_results=eof_results, correlation_results=correlation_results, fig_dir=fig_dir)
         progress.console.print("[bold green]✔ All figures generated![/bold green]")
-        progress.update(task_id, description="[bold green]Analysis Complete!", advance=1)
+        progress.update(task_id, description="[bold green]Analysis complete!", advance=1)
 
 if __name__ == "__main__":
     main()

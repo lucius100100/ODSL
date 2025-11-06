@@ -11,6 +11,7 @@ import pickle
 import numpy as np
 from pathlib import Path
 from functools import wraps
+import hashlib
 import config
 import os
 import sys
@@ -43,6 +44,7 @@ def setup_esmf_environment():
         #set environment variable
         if found_path:
             os.environ['ESMFMKFILE'] = str(found_path)
+            print(f"ESMFMKFILE set to: {found_path}")
         else:
             raise ImportError(
                 "Could not find 'esmf.mk' in the environment.\n" "The xesmf package installation may be incomplete or corrupted.\n" "Please try reinstalling it with: `conda install -c conda-forge xesmf`."
@@ -60,19 +62,27 @@ def cache_result(cache_key_prefix):
         def wrapper(*args, **kwargs):
 
             #dynamic cache name
-            arg_str = "_".join(map(str, args))
-            kwarg_str = "_".join(f"{k}_{v}" for k, v in sorted(kwargs.items()))
-            dynamic_part = "_".join(filter(None, [arg_str, kwarg_str]))
-            cache_name = f"{cache_key_prefix}_{dynamic_part}" if dynamic_part else cache_key_prefix
+            arg_hash = generate_arg_hash(*args, **kwargs)
+            cache_name = f"{cache_key_prefix}_{arg_hash}"
 
             #cache paths
+            dir_path = CACHE_DIR / cache_name
             nc_path = CACHE_DIR / f"{cache_name}.nc"
             csv_path = CACHE_DIR / f"{cache_name}.csv"
             json_path = CACHE_DIR / f"{cache_name}.json"
-            pkl_path = CACHE_DIR / f"{cache_name}.pkl"
 
             #load from cache
             if config.USE_CACHE and not config.FORCE_RECOMPUTE:
+
+                #check for directory cache
+                if dir_path.is_dir():
+                    print(f"Loading cached dictionary of xarray objects from: {dir_path}")
+                    reconstructed_dict = {}
+                    for file_path in dir_path.glob('*.nc'):
+                        key = file_path.stem 
+                        reconstructed_dict[key] = xr.open_dataset(file_path)
+                    return reconstructed_dict
+
                 if nc_path.exists():
                     print(f"Loading cached xarray data from: {nc_path}")
                     return xr.open_dataset(nc_path)
@@ -85,11 +95,6 @@ def cache_result(cache_key_prefix):
                     print(f"Loading cached data from JSON: {json_path}")
                     with open(json_path, 'r') as f:
                         return json.load(f)
-                
-                if pkl_path.exists():
-                    print(f"Loading cached data from pickle: {pkl_path}")
-                    with open(pkl_path, 'rb') as f:
-                        return pickle.load(f)
 
             #compute and save
             print(f"Computing {cache_name}...")
@@ -97,28 +102,49 @@ def cache_result(cache_key_prefix):
 
             if config.USE_CACHE:
                 try:
-                    #netcdf
+
+                    #xarray object
                     if isinstance(result, (xr.Dataset, xr.DataArray)):
                         print(f"Caching result as NetCDF to: {nc_path}")
                         result.to_netcdf(nc_path)
                     
-                    #csv
+                    #pandas dataframe
                     elif isinstance(result, pd.DataFrame):
                         print(f"Caching result as CSV to: {csv_path}")
                         result.to_csv(csv_path)
                     
-                    #json
+                    #dictionaries and lists
                     elif isinstance(result, (dict, list)):
-                        print(f"Caching result as JSON to: {json_path}")
-                        json_result = convert_for_json(result)
-                        with open(json_path, 'w') as f:
-                            json.dump(json_result, f, indent=2)
+                        try:
+
+                            #serialize as JSON
+                            print(f"Attempting to cache result as JSON to: {json_path}")
+                            json_result = convert_for_json(result)
+                            with open(json_path, 'w') as f:
+                                json.dump(json_result, f, indent=2)
+                            print("Successfully cached as JSON.")
+
+                        except TypeError:
+
+                            #if JSON fails check for dict of xarray objects
+                            is_dict_of_datasets = (
+                                isinstance(result, dict) and result and
+                                all(isinstance(v, (xr.Dataset, xr.DataArray)) for v in result.values())
+                            )
+                            
+                            if is_dict_of_datasets:
+                                
+                                #directory-based netcdf
+                                print(f"JSON serialization failed. Caching dictionary of xarray objects to directory: {dir_path}")
+                                dir_path.mkdir(parents=True, exist_ok=True)
+                                for key, ds in result.items():
+                                    ds.to_netcdf(dir_path / f"{key}.nc")
+                            
+                            else:
+                                print(f"Warning: Could not cache {cache_name}. Object is not serializable to JSON and is not a recognized complex type.")
                     
-                    #pickle
                     else:
-                        print(f"Caching result as pickle to: {pkl_path}")
-                        with open(pkl_path, 'wb') as f:
-                            pickle.dump(result, f)
+                        print(f"Warning: Could not cache {cache_name}. Data type '{type(result).__name__}' is not supported by the caching implementation.")
                             
                 except Exception as e:
                     print(f"Warning: Could not cache {cache_name}: {e}")
@@ -141,9 +167,65 @@ def convert_for_json(obj):
     elif isinstance(obj, np.bool_):
         return bool(obj)
     elif isinstance(obj, (xr.Dataset, xr.DataArray)):
-        return f"<xarray.{type(obj).__name__}>"
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
     else:
         return obj
+
+def generate_arg_hash(*args, **kwargs):
+    """Generates a short, deterministic SHA256 hash from function arguments, including complex objects like xarray and pandas."""
+    
+    hasher = hashlib.sha256()
+
+    def update_hash(obj):
+        
+        if isinstance(obj, xr.Dataset):
+
+            #xarray dataset
+            for var_name in sorted(obj.variables):
+                hasher.update(obj[var_name].values.tobytes())
+            sorted_attrs = str(sorted(obj.attrs.items()))
+            hasher.update(sorted_attrs.encode('utf-8'))
+
+        elif isinstance(obj, xr.DataArray):
+    
+            #xarray dataarray
+            hasher.update(obj.values.tobytes())
+            for coord_name in sorted(obj.coords):
+                hasher.update(obj[coord_name].values.tobytes())
+            sorted_attrs = str(sorted(obj.attrs.items()))
+            hasher.update(sorted_attrs.encode('utf-8'))
+
+        elif isinstance(obj, pd.DataFrame):
+
+            #hash data, index, and columns
+            hasher.update(obj.values.tobytes())
+            hasher.update(obj.index.values.tobytes())
+            hasher.update(obj.columns.values.tobytes())
+
+        elif isinstance(obj, (tuple, list)):
+
+            #hash elements
+            for item in obj:
+                update_hash(item)
+
+        elif isinstance(obj, dict):
+
+            #hash key-value pairs
+            for key, value in sorted(obj.items()):
+                update_hash(key)
+                update_hash(value)
+
+        else:
+
+            #hash string
+            hasher.update(str(obj).encode('utf-8'))
+
+    #positional and keyword arguments
+    update_hash(args)
+    update_hash(kwargs)
+    
+    #first 16 characters of hex digest
+    return hasher.hexdigest()[:16]
 
 def rotate_longitude(ds, name_lon):
     """Convert longitude from 0-360 to -180-180 coordinate system."""
@@ -266,27 +348,6 @@ def detrend_timeseries(data_array, degree=1, dim='time'):
     
     #return residuals
     return data_array - fit
-
-def calculate_single_eof(data_array, n_modes=3):
-    """Helper function to perform EOF analysis on a single DataArray."""
-
-    if data_array.time.size < n_modes:
-        print(f"Skipping EOF; not enough time steps ({data_array.time.size})")
-        return None
-        
-    coslat = np.cos(np.deg2rad(data_array['latitude'].values))
-    weights = np.sqrt(coslat)[..., np.newaxis]
-    solver = Eof(data_array, weights=weights)
-    
-    eofs = solver.eofs(neofs=n_modes)
-    pcs = solver.pcs(npcs=n_modes, pcscaling=1)
-    variance_fractions = solver.varianceFraction(neigs=n_modes)
-    
-    return xr.Dataset({
-        'eofs': eofs,
-        'pcs': pcs,
-        'variance_fractions': variance_fractions
-    })
 
 def calculate_pc_index_correlations(pcs, indices_dict):
     """Helper function to correlate a single set of PCs with indices."""
