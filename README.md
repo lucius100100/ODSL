@@ -1,4 +1,4 @@
-# Ocean Dynamic Sea Level (ODSL) Analysis
+# Ocean Dynamic Sea Level (ODSL) analysis
 
 ## Overview
 
@@ -28,16 +28,16 @@ rm -rf cache/*
 
 ## Features
 
-- **Observational ODSL Calculation**: Combines altimetry, geoid, and GIA data
-- **CMIP Model Analysis**: Processes CMIP models (historical + RCP4.5)
-- **Model-Observation Comparison**: Calculates Pattern Correlation Coefficient (PCC) and Root Mean Square Error (RMSE)
-- **Sliding Window Analysis**: Identifies best-matching 20-year periods
-- **Ensemble Statistics**: Creates multi-model ensemble means
+- **Observational ODSL calculation**: Combines altimetry, geoid, and GIA data
+- **CMIP model analysis**: Processes CMIP5 and CMIP6 models (historical + future scenario)
+- **Model-observation comparison**: Calculates Pattern Correlation Coefficient (PCC) and Root Mean Square Error (RMSE)
+- **Sliding window analysis**: Identifies best-matching periods with a window size of max 31 years (1993-2024)
+- **Ensemble statistics**: Creates multi-model ensemble means
 - **Visualization**: Generates publication-quality figures
 
-## Data Requirements
+## Data requirements
 
-1. **Altimetry Data**
+1. **Altimetry data**
    - Source: DUACS/CMEMS
    - DOI: 10.48670/moi-00148
    - Files: `cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1M-m_*.nc`
@@ -48,18 +48,18 @@ rm -rf cache/*
    - Files: `total.nc`
    - [Download Link](https://zenodo.org/records/3862995)
 
-3. **GIA Data (Peltier et al., 2015)**
+3. **GIA data (Peltier et al., 2015)**
    - Model: ICE-6G_C (VM5a)
    - Files: `drad.1grid_O512.nc`, `dsea.1grid_O512.nc`
    - [Download Link](https://www.atmosp.physics.utoronto.ca/~peltier/data.php)
 
-4. **CMIP Data**
+4. **CMIP data**
    - Preprocessed by Dewi Le Bars (KNMI)
    - Variable: `zos` (sea surface height)
    - Scenarios: historical, RCP2.6, RCP4.5, RCP8.5
    - [Preprocessing Code](https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py)
 
-### Data Directory Structure
+### Data directory structure
 
 ```text
 Data/
@@ -91,7 +91,7 @@ Data/
 - Python 3.8+
 - Conda or pip for package management
 
-## Project Structure
+## Project structure
 
 ```text
 ODSL/
@@ -106,7 +106,7 @@ ODSL/
 └── README.md             # This file
 ```
 
-## Cache Size
+## Cache size
 
 Total cache size: ~5-10 GB
 First run: 30-60 minutes
@@ -153,7 +153,7 @@ If you use this code in your research, please cite:
 }
 ```
 
-## Data References
+## Data references
 
 1. **Richter, K., Øie Nilsen, J. E., Raj, R. P., Bethke, I., Johannessen, J. A., Slangen, A. B., & Marzeion, B. (2017)**. Northern North Atlantic sea level in CMIP5 climate models: evaluation of mean state, variability, and trends against altimetric observations. *Journal of Climate*, 30(23), 9383-9398.
 

@@ -25,13 +25,14 @@ Data loading functions for ODSL analysis.
 # https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py
 #----------------------------------------------------------------------------------------#
 
-from utils import (cache_result, rotate_longitude)
-from config import (CMIP_VERSION, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO)
+from utils import (cache_result, rotate_longitude, inpaint_nans)
+from config import (CMIP_VERSION, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO, APPLY_NaN_INPAINTING_BUDGET)
 
 import xarray as xr
 import os
 import glob
 import pandas as pd
+import numpy as np
 
 #correct configuration
 if CMIP_VERSION == 'CMIP5':
@@ -67,20 +68,22 @@ def load_altimetry_data():
     """Load and process altimetry data."""
 
     print("Loading altimetry data...")
+
     try:
         duacs_dir = find_folder_by_name("Altimetry")
     except FileNotFoundError:
         print("Warning: Altimetry folder not found, trying alternative search...")
         data_path = find_folder_by_name("Data")
         duacs_dir = os.path.join(data_path, "Altimetry")
+
     duacs_pattern = os.path.join(duacs_dir, 'cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1M-m_*.nc')
     duacs_ds = xr.open_mfdataset(duacs_pattern, combine='by_coords').load()
     duacs_ds = rotate_longitude(duacs_ds, 'longitude')
     duacs_ds['sla'] *= 100  #m to cm
-    duacs_yearly = duacs_ds.groupby('time.year').mean()
-    print(f"Altimetry range: {duacs_yearly.sla.min().item():.2f} to {duacs_yearly.sla.max().item():.2f} cm/yr")
 
-    return duacs_yearly
+    print(f"Altimetry range: {duacs_ds.sla.min().item():.2f} to {duacs_ds.sla.max().item():.2f} cm/yr")
+
+    return duacs_ds
 
 @cache_result('budget_data')
 def load_budget_data(extend_to_year=None):
@@ -93,6 +96,7 @@ def load_budget_data(extend_to_year=None):
             budget_dir = find_folder_by_name("Frederikse")
     except FileNotFoundError:
         print("Warning: Budget/Frederikse folder not found")
+
     frederikse_file = os.path.join(budget_dir, 'total.nc')
     ds_frederikse = xr.open_dataset(frederikse_file)
 
@@ -101,10 +105,32 @@ def load_budget_data(extend_to_year=None):
     vlm_component = ds_frederikse['total_rad_mean']  #RAD or Vertical Land Motion (VLM) [mm]
     asl_frederikse = rsl_component + vlm_component   #geocentric sea level
 
+    if APPLY_NaN_INPAINTING_BUDGET:
+
+        #count NaNs for print
+        nans_before = np.sum(np.isnan(asl_frederikse.values))
+        num_timesteps = len(asl_frederikse.time)
+
+        #in paint coastal NaN gaps
+        print("In-painting coastal NaN gaps in budget data...")
+
+        asl_frederikse = xr.apply_ufunc(inpaint_nans, asl_frederikse, input_core_dims=[['lat', 'lon']], output_core_dims=[['lat', 'lon']], exclude_dims=set(('lat', 'lon')), dask="parallelized", vectorize=True)
+        
+        #print NaNs
+        nans_after = np.sum(np.isnan(asl_frederikse.values))
+        filled_count = nans_before - nans_after
+        
+        if num_timesteps > 0:
+            avg_filled_per_step = filled_count / num_timesteps
+            print(f"In-painting complete. Filled an average of {avg_filled_per_step:.0f} NaN grid cells per time step.")
+
+        print("In-painting complete.")
+
     #rotate and standardize coordinates
     asl_frederikse = rotate_longitude(asl_frederikse, 'lon')
     asl_frederikse = asl_frederikse.rename({'lon': 'longitude', 'lat': 'latitude', 'time': 'year'})
 
+    #extend budget data beyond 2018 if needed based on the last 10 years linear trend
     if extend_to_year and asl_frederikse.year.max() < extend_to_year:
         print(f"Extending budget data to year {extend_to_year}...")
         last_year = asl_frederikse.year.max().item()
@@ -128,7 +154,7 @@ def load_budget_data(extend_to_year=None):
         extended_data = xr.concat(extended_data_list, dim='year')
         asl_frederikse = xr.concat([asl_frederikse, extended_data], dim='year')
 
-    print(f"Geocentric sea level range: {asl_frederikse.min().item():.2f} to {asl_frederikse.max().item():.2f} cm/yr")
+    print(f"Budget data sea level range: {asl_frederikse.min().item():.2f} to {asl_frederikse.max().item():.2f} cm/yr")
 
     return asl_frederikse
 
@@ -426,3 +452,4 @@ def load_climate_indices_dict():
         'amo': amo_ds['amo_index'] if amo_ds is not None else None,
         'eap': eap_ds['eap_index'] if eap_ds is not None else None
     }
+

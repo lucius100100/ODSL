@@ -4,10 +4,10 @@
 Execute the full ODSL calculations / analysis and plotting.
 """
 
-from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, find_folder_by_name, load_amo_index, load_nao_index, load_climate_indices_dict)
+from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, load_climate_indices_dict)
 from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries, calculate_pc_index_correlations)
 from plotting import create_all_figures 
-from config import (CMIP_VERSION, START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO, EOF_N_MODES)
+from config import (CMIP_VERSION, START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO, EOF_N_MODES, APPLY_SPATIAL_SMOOTHING, SPATIAL_SMOOTHING_SIGMA)
 
 #setup_esmf_environment()
 
@@ -16,11 +16,12 @@ import numpy as np
 import xarray as xr
 import xesmf as xe
 import pandas as pd
-import traceback
-from scipy import stats
-import statsmodels.api as sm
+#import traceback
+#from scipy import stats
+#import statsmodels.api as sm
 from eofs.xarray import Eof
-from itertools import zip_longest
+from astropy.convolution import Gaussian2DKernel, convolve
+#from itertools import zip_longest
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 
 #correct configuration
@@ -45,11 +46,45 @@ def calculate_observed_odsl():
     print("\nCalculating observed ODSL...")
     
     #load data
-    duacs_yearly = load_altimetry_data()
+    #altimetry
+    duacs_ds_original = load_altimetry_data()
+    duacs_ds = duacs_ds_original.copy(deep=True)
+    #budget
     asl_frederikse = load_budget_data(extend_to_year=END_YEAR if END_YEAR > 2018 else None)
+    #GIA
     gia_data = load_gia_data()
     gia_rad_da = gia_data['gia_rad']
     gia_sea_da = gia_data['gia_sea']
+
+    #potential smoothing altimetry dataset
+    if APPLY_SPATIAL_SMOOTHING:
+        print(f"Applying Gaussian spatial smoothing with sigma={SPATIAL_SMOOTHING_SIGMA}...")
+        
+        #when only defining x astropy assumes isotropic
+        kernel = Gaussian2DKernel(x_stddev=SPATIAL_SMOOTHING_SIGMA)
+        
+        smoothed_slices = []
+        
+        #loop over each time step
+        for time_slice in duacs_ds['sla'].time:
+
+            data_slice = duacs_ds['sla'].sel(time=time_slice)
+            
+            #apply convolution
+            smoothed_values = convolve(data_slice.values, kernel, boundary='extend', preserve_nan=True)
+            
+            #new DataArray from smoothed values
+            smoothed_da = xr.DataArray(smoothed_values, coords=data_slice.coords, dims=data_slice.dims)
+            
+            smoothed_slices.append(smoothed_da)
+            
+        smoothed_sla = xr.concat(smoothed_slices, dim='time')
+        duacs_ds['sla'] = smoothed_sla
+        
+        print("Smoothing complete.")
+
+    #yearly mean after optional smoothing
+    duacs_yearly = duacs_ds.groupby('time.year').mean()
     
     #common years
     year_slice = slice(START_YEAR, END_YEAR)
@@ -60,8 +95,13 @@ def calculate_observed_odsl():
     print(f"Analysis period: {common_years.min()}-{common_years.max()} ({len(common_years)} years)")
     
     #trends over common period
-    trend_sla_alt = duacs_yearly.sla.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1)
-    trend_asl_fr = asl_frederikse.sel(year=common_years).polyfit(dim='year', deg=1)['polyfit_coefficients'].sel(degree=1)
+    #altimetry
+    polyfit_ds_sla = duacs_yearly.sla.sel(year=common_years).polyfit(dim='year', deg=1)
+    trend_sla_alt = polyfit_ds_sla['polyfit_coefficients'].sel(degree=1)
+    
+    #budget
+    polyfit_ds_asl = asl_frederikse.sel(year=common_years).polyfit(dim='year', deg=1)
+    trend_asl_fr = polyfit_ds_asl['polyfit_coefficients'].sel(degree=1)
     
     #regridding
     print("Creating regridders...")
@@ -135,10 +175,14 @@ def calculate_observed_odsl():
     except AttributeError:
         pass
 
+    odsl_yearly_fields.name = 'odsl_yearly'
+    odsl_yearly_anomaly.name = 'odsl_yearly_anomaly'
+
     output_ds = xr.Dataset(
         {
             'odsl': odsl_mm_yr,
-            'odsl_yearly': odsl_yearly_anomaly,
+            'odsl_yearly': odsl_yearly_fields,
+            'odsl_yearly_anomaly': odsl_yearly_anomaly,
             'msl': trend_sla_alt_mm_yr,
             'geoid': trend_asl_fr_regridded_mm_yr,
             'gia': gia_regridded_mm_yr,
@@ -152,6 +196,76 @@ def calculate_observed_odsl():
     output_ds.attrs['common_years_list'] = common_years.tolist() 
 
     return output_ds
+
+@cache_result('smoothing_sensitivity_results')
+def calculate_smoothing_sensitivity():
+    """Calculates altimetry trends for different levels of Gaussian smoothing."""
+
+    print("\nPerforming smoothing sensitivity analysis...")
+
+    duacs_ds = load_altimetry_data()
+    
+    #think about values, number of operations scales with O(sigma^2)
+    sigmas = [0, 3, 6, 9]
+    trend_maps = []
+
+    print(f"Calculating trends for sigma levels: {sigmas}")
+
+    for sigma in sigmas:
+
+        #copy
+        ds_to_process = duacs_ds.copy(deep=True)
+
+        if sigma > 0:
+            print(f"  Applying smoothing for sigma={sigma}...")
+            kernel = Gaussian2DKernel(x_stddev=sigma)
+            
+            #loop over time slices and apply convolution
+            smoothed_slices = []
+            for time_slice in ds_to_process['sla'].time:
+                data_slice = ds_to_process['sla'].sel(time=time_slice)
+                
+                smoothed_values = convolve(
+                    data_slice.values, 
+                    kernel, 
+                    boundary='extend', 
+                    preserve_nan=True
+                )
+                
+                smoothed_da = xr.DataArray(
+                    smoothed_values,
+                    coords=data_slice.coords,
+                    dims=data_slice.dims
+                )
+                smoothed_slices.append(smoothed_da)
+            
+            #combine
+            smoothed_sla = xr.concat(smoothed_slices, dim='time')
+            ds_to_process['sla'] = smoothed_sla
+        
+        #annual mean and trend
+        duacs_yearly = ds_to_process.groupby('time.year').mean()
+        year_slice = slice(START_YEAR, END_YEAR)
+        sla_yearly_da = duacs_yearly['sla']
+        
+        #polyfit
+        trend = sla_yearly_da.sel(year=year_slice).polyfit(
+            dim='year', deg=1
+        )['polyfit_coefficients'].sel(degree=1)
+        
+        trend_maps.append(trend)
+
+    #combine with sigma coordinate
+    combined_trends = xr.concat(
+        trend_maps, 
+        dim=pd.Index(sigmas, name='sigma')
+    )
+    
+    #cm/yr -> mm/yr
+    combined_trends_mm_yr = combined_trends * 10
+    
+    print("Smoothing sensitivity analysis complete.")
+    return combined_trends_mm_yr
 
 @cache_result('valid_models_table')
 def valid_models_table():
@@ -212,6 +326,7 @@ def valid_models_table():
 @cache_result('processed_CMIP_models')
 def process_cmip_models():
     """Process CMIP models and return a single dataset."""
+    
     print(f"\nProcessing {CMIP_VERSION} models...")
     
     inventory = get_cmip_files_inventory(CMIP_VERSION)
@@ -272,13 +387,21 @@ def process_cmip_models():
     trend_stds = xr.DataArray([s['std_x'] for s in trend_stats_list], coords={'model': model_names}, dims=['model'])
     
     #multi-model mean
-    model_mean_trend = model_trends.mean(dim='model', skipna=True)
+    model_mean_trend_zos = model_trends.mean(dim='model', skipna=True)
     model_mean_variability = model_variability.mean(dim='model', skipna=True)
     
+    #remove global mean
+    weights = np.cos(np.deg2rad(model_mean_trend_zos.latitude))
+    weights.name = "weights"
+    model_global_mean = model_mean_trend_zos.weighted(weights).mean().item()
+    
+    model_mean_trend = model_mean_trend_zos - model_global_mean
+
     #dataset object
     output_ds = xr.Dataset(
         {
             'model_trend': model_trends,
+            'model_mean_trend_zos' : model_mean_trend_zos,
             'model_mean_trend': model_mean_trend,
             'model_variability': model_variability,
             'model_mean_variability': model_mean_variability,
@@ -292,6 +415,85 @@ def process_cmip_models():
     #global attributes
     output_ds.attrs['description'] = f"Processed {CMIP_VERSION} model trends, variability, and timeseries."
     output_ds.attrs['valid_models_count'] = len(model_names)
+    
+    return output_ds
+
+@cache_result('incrementing_window_results')
+def perform_incrementing_window_analysis(obs_results, cmip_results):
+    """Performs an analysis with an incrementally increasing window size, calculating PCC and RMSE between observed and modeled ODSL trends for each window."""
+    
+    print("\nPerforming incrementing window analysis...")
+
+    #yearly timeseries data for observations and models
+    obs_yearly_ts = obs_results['odsl_yearly'].rename({'year': 'time'})
+    model_full_ts = cmip_results['full_timeseries']
+
+    #sample model grid and region mask for regridding and weighting
+    sample_model_grid = cmip_results['model_mean_trend']
+    region_mask = create_region_mask(sample_model_grid, EXTENT)
+
+    #regrid observed to model grid
+    print("Regridding observed timeseries to model grid...")
+
+    regridder_obs_to_model = xe.Regridder(obs_yearly_ts, sample_model_grid, 'bilinear', periodic=True)
+    obs_yearly_ts_regridded = regridder_obs_to_model(obs_yearly_ts)
+
+    try:
+        regridder_obs_to_model.clean_weight_file()
+    except AttributeError:
+        pass
+
+    #dictionary of all timeseries sources to analyze
+    sources_ts = {'mmm': model_full_ts.mean(dim='model')}
+    for model_name in cmip_results.model.values:
+        sources_ts[model_name] = model_full_ts.sel(model=model_name)
+
+    window_end_years = range(START_YEAR + 1, END_YEAR + 1)
+    
+    #dictionaries
+    all_pcc = {source: [] for source in sources_ts.keys()}
+    all_rmse = {source: [] for source in sources_ts.keys()}
+
+    print(f"Calculating trends for {len(window_end_years)} incrementing windows...")
+    for end_year in window_end_years:
+        window_slice = slice(START_YEAR, end_year)
+        
+        #trend for the observed data for the current window
+        obs_window_data = obs_yearly_ts_regridded.sel(time=window_slice)
+        obs_trend_coeffs = obs_window_data.polyfit(dim='time', deg=1)
+        obs_trend = obs_trend_coeffs.polyfit_coefficients.sel(degree=1)
+
+        #loop through each model
+        for source_name, source_ts in sources_ts.items():
+            model_window_data = source_ts.sel(time=window_slice)
+            model_trend_coeffs = model_window_data.polyfit(dim='time', deg=1)
+            model_trend = model_trend_coeffs.polyfit_coefficients.sel(degree=1) * 10 #cm/yr -> mm/yr
+
+            #weighted PCC and RMSE
+            stats = calculate_weighted_stats(model_trend, region_mask, data_y=obs_trend)
+            
+            all_pcc[source_name].append(stats['pcc'])
+            all_rmse[source_name].append(stats['rmse'])
+
+    print("Incrementing window analysis complete.")
+
+    #output
+    source_coord = list(sources_ts.keys())
+    pcc_da = xr.DataArray(
+        [all_pcc[s] for s in source_coord],
+        coords={'source': source_coord, 'end_year': window_end_years},
+        dims=['source', 'end_year'],
+        name='pcc'
+    )
+    rmse_da = xr.DataArray(
+        [all_rmse[s] for s in source_coord],
+        coords={'source': source_coord, 'end_year': window_end_years},
+        dims=['source', 'end_year'],
+        name='rmse'
+    )
+
+    output_ds = xr.Dataset({'pcc': pcc_da, 'rmse': rmse_da})
+    output_ds.attrs['description'] = "PCC and RMSE from an incrementing window analysis of ODSL trends."
     
     return output_ds
 
@@ -449,6 +651,7 @@ def perform_sliding_window_analysis():
 @cache_result('cmip_scenario_timeseries_results')
 def process_cmip_scenario_data():
     """Process CMIP data to get ensemble timeseries for each scenario."""
+
     print("\nProcessing CMIP scenario ensembles")
     
     final_results = []
@@ -476,8 +679,14 @@ def process_cmip_scenario_data():
                     ts = load_cmip_model_data(model_name, hist_scenario='historical', future_scenario=future_scen, cmip_version=cmip_version, end_year=end_year)
                     if ts is None: continue
                     
-                    region_mask = create_region_mask(ts.isel(time=0), EXTENT)
-                    regional_ts = ts.where(region_mask).mean(dim=['latitude', 'longitude'])
+                    #remove global mean
+                    weights = np.cos(np.deg2rad(ts.latitude))
+                    weights.name = "weights"
+                    global_mean_ts = ts.weighted(weights).mean(dim=['latitude', 'longitude'])
+                    odsl_ts = ts - global_mean_ts
+
+                    region_mask = create_region_mask(odsl_ts.isel(time=0), EXTENT)
+                    regional_ts = odsl_ts.where(region_mask).mean(dim=['latitude', 'longitude'])
                     regional_ts_mm = regional_ts * 10
                     regional_ts_mm = regional_ts_mm.rename({'time': 'year'})
                     model_timeseries_list.append(regional_ts_mm)
@@ -519,41 +728,8 @@ def process_cmip_scenario_data():
     combined_results = xr.concat(final_results, dim=cmip_coord)
     
     print(f"Successfully processed timeseries for {len(final_results)} CMIP versions")
+
     return combined_results
-
-# @cache_result('lowess_fit_variability')
-# def calculate_lowess_fit():
-#     """Calculates and caches the LOWESS fit by loading the necessary precursor data."""
-
-#     print(f"\nCalculating and caching LOWESS fit with frac={LOWESS_FRAC}...")
-
-#     #load data
-#     sliding_results = perform_sliding_window_analysis()
-#     cmip_results = process_cmip_models()
-#     obs_data = sliding_results['odsl_var_obs_regridded']
-#     model_data = cmip_results['model_mean_variability']
-
-#     #flatten
-#     x_flat = obs_data.values.flatten()
-#     y_flat = model_data.values.flatten()
-
-#     #mask
-#     valid_mask = ~np.isnan(x_flat) & ~np.isnan(y_flat)
-#     obs_points = x_flat[valid_mask]
-#     model_points = y_flat[valid_mask]
-
-#     #LOWESS calculation
-#     lowess_result = sm.nonparametric.lowess(endog=model_points, exog=obs_points, frac=LOWESS_FRAC)
-    
-#     #combine
-#     raw_points_df = pd.DataFrame({'obs_points': obs_points, 'model_points': model_points})
-#     fit_df = pd.DataFrame(lowess_result, columns=['x_fit', 'y_fit'])
-#     combined_df = pd.concat([raw_points_df, fit_df], axis=1)
-    
-#     combined_df.attrs['frac'] = LOWESS_FRAC
-    
-#     print("LOWESS fit calculation complete.")
-#     return combined_df
 
 @cache_result('single_eof_result')
 def calculate_single_eof(data_array, n_modes=EOF_N_MODES):
@@ -621,6 +797,7 @@ def perform_eof_analysis(obs_results, cmip_results, n_modes=EOF_N_MODES):
 
     return all_eof_results
 
+@cache_result('indices_correlation_results')
 def correlate_with_indices(all_eof_results):
     """Correlates the PCs from each EOF analysis result with climate indices."""
 
@@ -652,51 +829,57 @@ def main():
 
     with Progress(*progress_columns) as progress:
 
-        total_steps = 9
+        total_steps = 11
         task_id = progress.add_task("[cyan]Overall progress", total=total_steps)
 
         #observed ODSL
-        progress.update(task_id, description="[bold blue]Step 1/8:[/bold blue] Calculating the observed ODSL", advance=1)
+        progress.update(task_id, description="[bold blue]Step 1/10:[/bold blue] Calculating the observed ODSL", advance=1)
         obs_results = calculate_observed_odsl()
         progress.console.print(f"Observed ODSL range: {obs_results['odsl'].min().item():.2f} to {obs_results['odsl'].max().item():.2f} mm/yr")
         progress.console.print("[green]✔ Completed observed ODSL calculation.[/green]")
-        progress.update(task_id, description="[bold blue]Step 2/8:[/bold blue] Finding valid CMIP models", advance=1)
+        
+        #smoothing comparison
+        progress.update(task_id, description="[bold blue]Step 2/10:[/bold blue] Smoothing comparison", advance=1)
+        smoothing_results = calculate_smoothing_sensitivity()
         
         #valid CMIP models
+        progress.update(task_id, description="[bold blue]Step 3/9:[/bold blue] Finding valid CMIP models", advance=1)
         models_df = valid_models_table()
         progress.console.print(models_df)
-        progress.update(task_id, description="[bold blue]Step 3/8:[/bold blue] Processing CMIP models", advance=1)
 
         #CMIP models
+        progress.update(task_id, description="[bold blue]Step 4/10:[/bold blue] Processing CMIP models", advance=1)
         cmip_results = process_cmip_models()
         progress.console.print(f"Processed {cmip_results.attrs['valid_models_count']} CMIP models")
-        progress.update(task_id, description="[bold blue]Step 4/8:[/bold blue] Performing sliding window analysis", advance=1)
+
+        #incrementing window analysis
+        progress.update(task_id, description="[bold blue]Step 5/10:[/bold blue] Performing incrementing window analysis", advance=1)
+        incrementing_window_results = perform_incrementing_window_analysis(obs_results, cmip_results)
+        progress.console.print("[green]✔ Completed incrementing window analysis.[/green]")
 
         #sliding window analysis
+        progress.update(task_id, description="[bold blue]Step 6/10:[/bold blue] Performing sliding window analysis", advance=1)
         sliding_results = perform_sliding_window_analysis()
         progress.console.print("[green]✔ Completed sliding window analysis.[/green]")
-        progress.update(task_id, description="[bold blue]Step 5/8:[/bold blue] Processing scenario data", advance=1)
 
         #scenario data
+        progress.update(task_id, description="[bold blue]Step 7/10:[/bold blue] Processing scenario data", advance=1)
         scenario_results = process_cmip_scenario_data()
         progress.console.print("[green]✔ Completed scenario data processing.[/green]")
-        progress.update(task_id, description="[bold blue]Step 6/8:[/bold blue] EOF analysis", advance=1)
-
-        # lowess_results = calculate_lowess_fit()
-        # print("Completed LOWESS fit calculation")
 
         #EOF analysis
+        progress.update(task_id, description="[bold blue]Step 8/10:[/bold blue] EOF analysis", advance=1)
         eof_results = perform_eof_analysis(obs_results, cmip_results, n_modes=EOF_N_MODES)
-        progress.update(task_id, description="[bold blue]Step 7/8:[/bold blue] Correlating with climate indices", advance=1)
 
         #EOF correlation with indices
+        progress.update(task_id, description="[bold blue]Step 9/10:[/bold blue] Correlating with climate indices", advance=1)
         correlation_results = correlate_with_indices(eof_results)
         progress.console.print("[green]✔ Completed EOF analysis and correlations.[/green]")
-        progress.update(task_id, description="[bold blue]Step 8/8:[/bold blue] Generating all figures", advance=1)
 
         #figures
+        progress.update(task_id, description="[bold blue]Step 10/10:[/bold blue] Generating all figures", advance=1)
         progress.console.print("\nAll calculations complete. Generating figures...")
-        create_all_figures(obs_results=obs_results, cmip_results=cmip_results, sliding_results=sliding_results, scenario_results=scenario_results, eof_results=eof_results, correlation_results=correlation_results, fig_dir=fig_dir)
+        create_all_figures(obs_results=obs_results, smoothing_results=smoothing_results, cmip_results=cmip_results, incrementing_window_results=incrementing_window_results, sliding_results=sliding_results, scenario_results=scenario_results, eof_results=eof_results, correlation_results=correlation_results, fig_dir=fig_dir)
         progress.console.print("[bold green]✔ All figures generated![/bold green]")
         progress.update(task_id, description="[bold green]Analysis complete!", advance=1)
 
