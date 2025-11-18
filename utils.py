@@ -7,7 +7,6 @@ Utility functions.
 import xarray as xr
 import pandas as pd
 import json
-import pickle
 import numpy as np
 from pathlib import Path
 from functools import wraps
@@ -15,10 +14,12 @@ import hashlib
 import config
 import os
 import sys
-from eofs.xarray import Eof
+#from eofs.xarray import Eof
 import matplotlib.path as mpath
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+from scipy.interpolate import griddata
+from scipy.ndimage import binary_dilation
 
 def setup_esmf_environment():
     """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported. See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
@@ -55,11 +56,14 @@ CACHE_DIR = Path('./cache')
 CACHE_DIR.mkdir(exist_ok=True)
 
 def cache_result(cache_key_prefix):
-    """Cache function, prioritize netcdf, csv, and json, pickle only if necessary."""
+    """Cache function, prioritize netcdf, csv, and json."""
     
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+
+            if not config.USE_CACHE:
+                return func(*args, **kwargs)
 
             #dynamic cache name
             arg_hash = generate_arg_hash(*args, **kwargs)
@@ -97,7 +101,11 @@ def cache_result(cache_key_prefix):
                         return json.load(f)
 
             #compute and save
-            print(f"Computing {cache_name}...")
+            if config.FORCE_RECOMPUTE:
+                print(f"Forcing re-computation for {cache_name}...")
+            else:
+                print(f"Computing {cache_name}...")
+
             result = func(*args, **kwargs)
 
             if config.USE_CACHE:
@@ -282,6 +290,7 @@ def calculate_weighted_stats(data_x, mask, data_y=None):
         return {k: np.nan for k in keys}
 
     x = stacked.data_x
+    
     #normalize weights
     w = stacked.weights / stacked.weights.sum()
 
@@ -301,6 +310,7 @@ def calculate_weighted_stats(data_x, mask, data_y=None):
 
     #MSE, RMSE, and PCC only if data_y is provided
     if data_y is not None:
+
         y = stacked.data_y
         
         #same stats for data_y
@@ -370,3 +380,42 @@ def calculate_pc_index_correlations(pcs, indices_dict):
         correlations[index_name] = xr.DataArray(corr_values, coords={'mode': pcs.mode.values}, dims=['mode'])
 
     return correlations
+
+def inpaint_nans(data_array):
+    """Fills NaN values that are adjacent to valid data points."""
+    
+    #mask
+    valid_mask = ~np.isnan(data_array)
+    
+    #check full or empty
+    if valid_mask.all() or not valid_mask.any():
+        return data_array
+
+    #binary_dilation expands the valid_mask by one pixel in all directions, subtracting original mask, left are pixels around margins
+    fringe_mask = binary_dilation(valid_mask) & ~valid_mask
+
+    #coordinates for interpolation
+    x = np.arange(0, data_array.shape[1])
+    y = np.arange(0, data_array.shape[0])
+    xx, yy = np.meshgrid(x, y)
+
+    #source points
+    valid_points = np.array([xx[valid_mask], yy[valid_mask]]).T
+    valid_values = data_array[valid_mask]
+    
+    #target points
+    points_to_interpolate = np.array([xx[fringe_mask], yy[fringe_mask]]).T
+    
+    #safety check
+    if points_to_interpolate.size == 0:
+        return data_array
+
+    #nearest neighbor interpolation
+    interpolated_values = griddata(valid_points, valid_values, points_to_interpolate, method='nearest')
+
+    #copy and fill margin cells
+    filled_array = data_array.copy()
+    filled_array[fringe_mask] = interpolated_values
+    
+    return filled_array
+
