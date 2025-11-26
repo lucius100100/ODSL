@@ -7,3 +7,5 @@ __pycache__/
 
 #ignore old code version
 ODSL_observational_and_modelled.py
+mask_test.png
+test_mask.py

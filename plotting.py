@@ -47,19 +47,23 @@ def create_all_figures(obs_results, smoothing_results, cmip_results, incrementin
 
     #plot_yearly_odsl_anomaly(obs_results, fig_dir)
 
+    plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, variable_fig_dir)
+    plot_observed_regridded(sliding_results, variable_fig_dir)
+    plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
+    plot_scree_and_pcs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
+
     if PLOT_VARIABLE == 'trend':
         plot_observed_odsl_components(obs_results, variable_fig_dir)
     elif PLOT_VARIABLE == 'variability':
         plot_observed_variability(obs_results, variable_fig_dir)
 
-    plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, variable_fig_dir)
     plot_smoothing_sensitivity(smoothing_results, cmip_results, fig_dir)
     plot_incrementing_window_skill(incrementing_window_results, variable_fig_dir)
 
     plot_eof_summary_table(eof_results, correlation_results, eof_fig_dir)
     export_eof_results_to_csv(eof_results, correlation_results, eof_fig_dir)
-    plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
-    plot_scree_and_pcs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
+    # plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
+    #plot_scree_and_pcs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
     plot_correlation_biplot(eof_results, correlation_results, eof_fig_dir, mode_x=0, mode_y=1)
     plot_scenario_comparison(scenario_results, fig_dir)
 
@@ -131,7 +135,7 @@ def plot_observed_odsl_components(obs_results, fig_dir):
     ax4.set_title(f'd) ODSL (MSL - Geoid - GIA)\nMean: {stats_odsl["mean_x"]:.2f} mm/yr, RMS: {stats_odsl["std_x"]:.2f} mm/yr')
     
     #colorbar
-    cbar_ax = fig.add_axes([0.2, 0.08, 0.6, 0.025])
+    cbar_ax = fig.add_axes((0.2, 0.08, 0.6, 0.025))
     cbar = fig.colorbar(im1, cax=cbar_ax, orientation='horizontal')
     cbar.locator = MaxNLocator(nbins=7, integer=True, prune='both')
     cbar.update_ticks()
@@ -195,6 +199,59 @@ def plot_cmip_multimodel_mean(cmip_results, fig_dir):
     #plt.show()
     plt.close(fig)
 
+def plot_observed_regridded(sliding_results, fig_dir):
+    """Plot the observed ODSL after regridding to the CMIP grid."""
+
+    print("Plotting observed ODSL (regridded to CMIP grid)...")
+    
+    cfg = PLOT_CONFIG[PLOT_VARIABLE]
+    
+    if PLOT_VARIABLE == 'trend':
+        data_to_plot = sliding_results['odsl_obs_dynamic']
+    else:
+        data_to_plot = sliding_results['odsl_var_obs_regridded']
+    
+    #projection
+    proj = ccrs.AlbersEqualArea(
+        central_longitude=PROJECTION_PARAMS['central_longitude'],
+        central_latitude=PROJECTION_PARAMS['central_latitude'],
+        standard_parallels=PROJECTION_PARAMS['standard_parallels']
+    )
+    
+    fig, ax = plt.subplots(figsize=(9, 8), subplot_kw={'projection': proj})
+    
+    add_map_features(ax, EXTENT, is_left=True, is_bottom=True)
+    
+    #color range
+    if PLOT_VARIABLE == 'trend':
+        vmax = abs(data_to_plot.quantile(0.98, skipna=True).item())
+        vmin = -vmax
+    else:
+        vmax = data_to_plot.max().compute().item()
+        vmin = 0
+
+    mesh = data_to_plot.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), cmap=cfg['cmap'], vmin=vmin, vmax=vmax, add_colorbar=False, levels=50)
+    
+    #colorbar
+    cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', shrink=0.8, pad=0.08)
+    cbar.set_ticks(np.arange(np.ceil(vmin), np.floor(vmax) + 1))
+    cbar.set_ticks([], minor=True)
+    cbar.set_label(f'ODSL {cfg["name"]} ({cfg["units"]})', fontsize=10)
+    
+    #regional statistics
+    region_mask = create_region_mask(data_to_plot, EXTENT)
+    stats_obs = calculate_weighted_stats(data_to_plot, region_mask)
+    
+    ax.set_title(
+        f'Observed ODSL ({cfg["name"]}), regridded to CMIP grid\n' 
+        f'({START_YEAR}-{END_YEAR}) Mean: {stats_obs["mean_x"]:.2f} {cfg["units"]}, '
+        f'RMS: {stats_obs["std_x"]:.2f} {cfg["units"]}',
+        fontsize=12, pad=15, fontweight='bold'
+    )
+    
+    plt.savefig(os.path.join(fig_dir, f'Observed_regridded_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
 def plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, fig_dir):
     """Plot observed vs modeled ODSL comparison for trend or variability."""
 
@@ -217,6 +274,7 @@ def plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, fig_dir
     else:
         model_data = cmip_results['model_mean_variability']
         obs_data = sliding_results['odsl_var_obs_regridded']
+        obs_data_high_res = obs_results['odsl']
         cmap_unified = cfg['cmap']
 
         vmax_unified = max(
@@ -270,14 +328,14 @@ def plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, fig_dir
     cbar_height = 0.03
 
     #shared colorbar observed and modeled
-    cbar_ax1 = fig.add_axes([pos1.x0, cbar_bottom, pos2.x1 - pos1.x0, cbar_height])
+    cbar_ax1 = fig.add_axes((pos1.x0, cbar_bottom, pos2.x1 - pos1.x0, cbar_height))
     cbar1 = fig.colorbar(mesh1, cax=cbar_ax1, orientation='horizontal')
     cbar1.set_ticks(np.arange(np.ceil(vmin_unified), np.floor(vmax_unified) + 1))
     cbar1.set_ticks([], minor=True)
     cbar1.set_label(f'{cfg["name"]} ({cfg["units"]})', fontsize=12)
     
     #colorbar difference
-    cbar_ax2 = fig.add_axes([pos3.x0, cbar_bottom, pos3.width, cbar_height])
+    cbar_ax2 = fig.add_axes((pos3.x0, cbar_bottom, pos3.width, cbar_height))
     cbar2 = fig.colorbar(mesh3, cax=cbar_ax2, orientation='horizontal')
     cbar2.set_ticks(np.arange(np.ceil(vmin_diff), np.floor(vmax_diff) + 1))
     cbar2.set_ticks([], minor=True)
@@ -365,10 +423,11 @@ def plot_sliding_window_timeseries(sliding_results, fig_dir):
     max_limit = window_centers.max() + 5
     ax3.set_xlim(min_limit, max_limit)
 
+    #legend
     handles, labels = ax1.get_legend_handles_labels()
     leg = fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1.01, 0.5), fontsize=12, framealpha=0.9, title='$\\bf{Models}$', title_fontsize=14)
     for legobj in leg.legend_handles:
-        legobj.set_linewidth(3.0)
+        legobj.set_linewidth(3.0) # type: ignore
     
     plt.tight_layout()
     
@@ -887,7 +946,7 @@ def plot_scenario_comparison(scenario_results, fig_dir):
                 last_historical_point = hist_data.isel(year=-1)
                 
                 #prepend to the future data
-                connected_data = xr.concat([last_historical_point, future_data], dim='year')
+                connected_data = xr.concat([last_historical_point, future_data], dim='year', data_vars='minimal', coords='minimal', compat='override')
                 
                 #connected data for plotting
                 ax_trend.plot(connected_data.year, connected_data.ensemble_mean / 10, color=color, linewidth=2, label=label, alpha=0.8)
@@ -896,8 +955,8 @@ def plot_scenario_comparison(scenario_results, fig_dir):
                 ax_var.fill_between(connected_data.year, 0, connected_data.ensemble_std / 10, color=color, alpha=0.1)
 
         #formatting
-        ax_trend.set_title(f'{cmip_version} regional ODSL anomaly', fontsize=14)
-        ax_var.set_title(f'{cmip_version} ensemble variability', fontsize=14)
+        ax_trend.set_title(f'{cmip_version} regional ODSL anomaly', fontsize=14, fontweight='bold')
+        ax_var.set_title(f'{cmip_version} ensemble variability', fontsize=14, fontweight='bold')
         
         for ax in [ax_trend, ax_var]:
             ax.grid(True, alpha=0.3)
@@ -915,10 +974,10 @@ def plot_scenario_comparison(scenario_results, fig_dir):
         ax.axvspan(START_YEAR, END_YEAR, color='red', alpha=0.2, zorder=0)
 
     #labels and limits
-    ax_trend_cmip5.set_ylabel('ODSL anomaly (cm)', fontsize=12)
-    ax_var_cmip5.set_ylabel('Variability (cm)', fontsize=12)
-    ax_var_cmip5.set_xlabel('Year', fontsize=12)
-    ax_var_cmip6.set_xlabel('Year', fontsize=12)
+    ax_trend_cmip5.set_ylabel('ODSL anomaly (cm)', fontsize=14)
+    ax_var_cmip5.set_ylabel('Variability (cm)', fontsize=14)
+    ax_var_cmip5.set_xlabel('Year', fontsize=14)
+    ax_var_cmip6.set_xlabel('Year', fontsize=14)
     
     #y-axis limits
     ax_trend_cmip5.set_ylim(trend_min * 1.05, trend_max * 1.05)
@@ -929,7 +988,6 @@ def plot_scenario_comparison(scenario_results, fig_dir):
     ax_var_cmip6.tick_params(axis='y', labelleft=False)
 
     plt.suptitle(f'ODSL CMIP scenario comparison\nNorth Atlantic region ({EXTENT[0]}°E-{EXTENT[1]}°E, {EXTENT[2]}°N-{EXTENT[3]}°N)', fontsize=16, fontweight='bold', y=0.98)
-    fig.tight_layout()
     plt.savefig(os.path.join(fig_dir, 'cmip_scenario_timeseries_comparison.png'), dpi=300, bbox_inches='tight')
     #plt.show()
     plt.close(fig)
@@ -957,6 +1015,7 @@ def plot_yearly_odsl_anomaly(obs_results, fig_dir):
     axes = axes.flatten()
 
     #loop
+    im = None
     for i, year in enumerate(odsl_anomaly.year.values):
         ax = axes[i]
         data_for_year = odsl_anomaly.sel(year=year)
@@ -974,12 +1033,13 @@ def plot_yearly_odsl_anomaly(obs_results, fig_dir):
 
     #formatting
     fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.15, hspace=0.15, wspace=0.05)
-    cbar_ax = fig.add_axes([0.2, 0.08, 0.6, 0.015]) 
-    cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', extend='both')
-    cbar.set_ticks(np.arange(np.ceil(vmin), np.floor(vmax) + 1))
-    cbar.set_ticks([], minor=True)
-    cbar_label = (f'Observed ODSL Anomaly (mm)\n' f'(Color range from 99th percentile: {vmin:.1f} to {vmax:.1f} mm)')
-    cbar.set_label(cbar_label, fontsize=11)
+    if im:
+        cbar_ax = fig.add_axes((0.2, 0.08, 0.6, 0.015)) 
+        cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', extend='both')
+        cbar.set_ticks(np.arange(np.ceil(vmin), np.floor(vmax) + 1))
+        cbar.set_ticks([], minor=True)
+        cbar_label = (f'Observed ODSL Anomaly (mm)\n' f'(Color range from 99th percentile: {vmin:.1f} to {vmax:.1f} mm)')
+        cbar.set_label(cbar_label, fontsize=11)
 
     fig.suptitle('Yearly observed ODSL anomaly', fontsize=16, fontweight='bold', y=0.97)
     
@@ -992,7 +1052,7 @@ def plot_yearly_odsl_anomaly(obs_results, fig_dir):
 def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
     """Visualizes the spatial patterns of the EOFs for each specified data source."""
 
-    sources_to_plot = ['observed', 'mmm']
+    sources_to_plot = ['observed', 'multi model mean']
 
     for source_name in sources_to_plot:
         if source_name not in all_eof_results:
@@ -1000,6 +1060,7 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
             continue
 
         print(f"Generating spatial EOF plot for: {source_name}")
+
         eof_results = all_eof_results[source_name]
         eofs = eof_results['eofs']
         variance = eof_results['variance_fractions']
@@ -1016,28 +1077,25 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
         if num_modes_to_plot == 1: 
             axes = [axes]
 
-        global_vmax = 0
-        for i in range(num_modes_to_plot):
-            mode_data = eofs.sel(mode=i)
-            global_vmax = max(global_vmax, abs(mode_data).max().item())
-
+        mesh = None
         for i in range(num_modes_to_plot):
             ax = axes[i]
             is_bottom = (i == num_modes_to_plot - 1)
             add_map_features(ax, EXTENT, is_left=True, is_bottom=is_bottom)
             mode_data = eofs.sel(mode=i)
+
+            mode_vmax = abs(mode_data).max(skipna=True).compute().item()
             
-            vmax = abs(mode_data).max()
-            mesh = ax.contourf(mode_data.longitude, mode_data.latitude, mode_data, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-global_vmax, vmax=global_vmax, levels=50)
+            mesh = ax.contourf(mode_data.longitude, mode_data.latitude, mode_data, transform=ccrs.PlateCarree(), cmap='coolwarm', vmin=-mode_vmax, vmax=mode_vmax, levels=50)
             ax.set_title(f"EOF mode {i+1} ({variance.sel(mode=i).item()*100:.1f}% variance)")
 
         fig.suptitle(f'Spatial EOF patterns for {source_name.upper()}', fontsize=16, fontweight='bold')
 
         #shared colorbar
-        cbar = fig.colorbar(mesh, ax=axes, orientation='vertical', shrink=0.8, pad=0.02)
-        cbar.set_label('Amplitude')
-
-        plt.tight_layout(rect=[0, 0, 0.88, 0.96])
+        if mesh:
+            cbar_ax = fig.add_axes((0.88, 0.125, 0.025, 0.75))
+            cbar = fig.colorbar(mesh, cax=cbar_ax, orientation='vertical')
+            cbar.set_label('Amplitude', fontsize=14)
         
         output_path = os.path.join(fig_dir, f'spatial_eofs_{source_name}.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -1047,7 +1105,7 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
 def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
     """Creates a scree plot and PC time series plot for each specified data source."""
 
-    sources_to_plot = ['observed', 'mmm']
+    sources_to_plot = ['observed', 'multi model mean']
 
     for source_name in sources_to_plot:
         if source_name not in all_eof_results:
@@ -1063,12 +1121,25 @@ def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
         #plot
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [1, 2]})
 
-        ax1.bar(variance.mode.values + 1, variance.values * 100)
+        modes = variance.mode.values + 1
+        var_pct = variance.values * 100
+        cum_var_pct = np.cumsum(variance.values) * 100
+
+        #barplot individual variance
+        ax1.bar(modes, var_pct, color='steelblue', alpha=0.7, label='Individual')
         ax1.set_title('Scree plot: variance explained by each mode')
         ax1.set_xlabel('Mode number')
-        ax1.set_ylabel('Variance explained (%)')
-        ax1.set_xticks(variance.mode.values + 1)
+        ax1.set_ylabel('Variance explained (%)', color='steelblue')
+        ax1.tick_params(axis='y', labelcolor='steelblue')
+        ax1.set_xticks(modes)
         ax1.grid(axis='y', linestyle='--', alpha=0.7)
+
+        #lineplot cumulative variance
+        ax1_twin = ax1.twinx()
+        ax1_twin.plot(modes, cum_var_pct, color='darkorange', marker='o', linestyle='-', linewidth=2, label='Cumulative')
+        ax1_twin.set_ylabel('Cumulative variance (%)', color='darkorange')
+        ax1_twin.tick_params(axis='y', labelcolor='darkorange')
+        ax1_twin.set_ylim(0, 100)
 
         linestyles = ['-', '--', ':', '-.'] 
 
@@ -1094,7 +1165,7 @@ def plot_scree_and_pcs(all_eof_results, fig_dir, num_modes_to_plot=3):
 def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, mode_x=0, mode_y=1):
     """Creates a biplot of PCs and index correlations for each specified data source."""
 
-    sources_to_plot = ['observed', 'mmm']
+    sources_to_plot = ['observed', 'multi model mean']
 
     for source_name in sources_to_plot:
         if source_name not in all_eof_results or source_name not in all_correlation_results:
@@ -1192,6 +1263,7 @@ def plot_eof_summary_table(all_eof_results, all_correlation_results, fig_dir):
     
     #dynamic order of sources and indices
     source_order = sorted(all_eof_results.keys())
+    
     try:
         index_names = sorted(list(next(iter(all_correlation_results.values())).keys()))
     except StopIteration:
@@ -1228,11 +1300,11 @@ def plot_eof_summary_table(all_eof_results, all_correlation_results, fig_dir):
 
     #plot
     fig_height = max(4, len(df) * 0.5)
-    fig, ax = plt.subplots(figsize=(14, fig_height))
+    fig, ax = plt.subplots(figsize=(20, fig_height))
     ax.axis('off')
 
     #table
-    table = ax.table(cellText=df.round(2).values, colLabels=df.columns, rowLabels=df.index, loc='center', cellLoc='center', rowColours=['#f2f2f2'] * len(df))
+    table = ax.table(cellText=df.round(2).values.tolist(), colLabels=df.columns.tolist(), rowLabels=df.index.tolist(), loc='center', cellLoc='center', rowColours=['#f2f2f2'] * len(df))
     
     table.auto_set_font_size(False)
     table.set_fontsize(10)
@@ -1256,11 +1328,13 @@ def plot_eof_summary_table(all_eof_results, all_correlation_results, fig_dir):
                 cell.set_facecolor('white')
                 continue
 
+            val_float = float(val) # type: ignore
+
             if 'Var' in col_name:
-                cell.set_facecolor(var_cmap(var_norm(val)))
+                cell.set_facecolor(var_cmap(var_norm(val_float)))
             else: 
-                cell.set_facecolor(corr_cmap(corr_norm(val)))
-                if abs(val) > 0.6:
+                cell.set_facecolor(corr_cmap(corr_norm(val_float)))
+                if abs(val_float) > 0.6:
                     cell.get_text().set_color('white')
 
     fig.suptitle('EOF variance and index correlations', fontsize=16, fontweight='bold')
@@ -1302,7 +1376,7 @@ def plot_scatter_comparison(cmip_results, sliding_results, fig_dir):
 
     #linear regression
     slope, intercept, r_value, _, _ = stats.linregress(x_points, y_points)
-    r_squared = r_value**2
+    r_squared = r_value**2 # type: ignore
     normalized_std_dev = stats_w['std_x'] / stats_w['std_y']
     num_points = len(x_points)
 
@@ -1310,10 +1384,10 @@ def plot_scatter_comparison(cmip_results, sliding_results, fig_dir):
     fig, ax = plt.subplots(figsize=(9, 8))
 
     abs_max = max(abs(np.nanmin(x_points)), abs(np.nanmax(x_points)), abs(np.nanmin(y_points)), abs(np.nanmax(y_points)))
-    lims = [-abs_max * 1.1, abs_max * 1.1]
+    lims = (-abs_max * 1.1, abs_max * 1.1)
 
     #hexbin with logarithmic scale
-    hb = ax.hexbin(x_points, y_points, gridsize=100, cmap='inferno', norm=LogNorm(), extent=[lims[0], lims[1], lims[0], lims[1]])
+    hb = ax.hexbin(x_points, y_points, gridsize=100, cmap='inferno', norm=LogNorm(), extent=(lims[0], lims[1], lims[0], lims[1]))
     
     #colorbar
     divider = make_axes_locatable(ax)
@@ -1380,6 +1454,7 @@ def plot_scatter_comparison_individual_models(cmip_results, sliding_results, fig
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 5, nrows * 4.5), sharex=True, sharey=True)
     axes = axes.flatten()
 
+    hb = None
     #loop
     for i, model_name in enumerate(model_names):
         ax = axes[i]
@@ -1400,7 +1475,7 @@ def plot_scatter_comparison_individual_models(cmip_results, sliding_results, fig
 
         #linear regression
         slope, intercept, r_value, _, _ = stats.linregress(x_points, y_points)
-        r_squared = r_value**2
+        r_squared = r_value**2 # type: ignore
         normalized_std_dev = stats_w['std_x'] / stats_w['std_y']
 
         #hexbin
@@ -1432,8 +1507,9 @@ def plot_scatter_comparison_individual_models(cmip_results, sliding_results, fig
     #shared colorbar
     pos_top_right = axes[ncols - 1].get_position()
     pos_bottom = axes[num_models - 1].get_position()
-    cbar_ax = fig.add_axes([pos_top_right.x1 + 0.015, pos_bottom.y0, 0.02, pos_top_right.y1 - pos_bottom.y0])
-    fig.colorbar(hb, cax=cbar_ax, label='Number of grid cells')
+    if hb:
+        cbar_ax = fig.add_axes((pos_top_right.x1 + 0.015, pos_bottom.y0, 0.02, pos_top_right.y1 - pos_bottom.y0))
+        fig.colorbar(hb, cax=cbar_ax, label='Number of grid cells')
 
     plt.savefig(os.path.join(fig_dir, f'scatter_comparison_individual_models_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
     #plt.show()
@@ -1459,7 +1535,7 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir):
     #individual models
     is_first_model = True
     for source in sources:
-        if source != 'mmm':
+        if source != 'multi model mean':
             if is_first_model:
                 #first model with label
                 ax1.plot(end_years, pcc_data.sel(source=source), color='lightgrey', linewidth=1, alpha=0.7, label='Individual models')
@@ -1469,9 +1545,9 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir):
                 ax1.plot(end_years, pcc_data.sel(source=source), color='lightgrey', linewidth=1, alpha=0.7)
             
     #multi-model mean
-    ax1.plot(end_years, pcc_data.sel(source='mmm'), color='black', linewidth=2.5, label='Multi-model mean')
+    ax1.plot(end_years, pcc_data.sel(source='multi model mean'), color='black', linewidth=2.5, label='Multi-model mean')
     
-    ax1.set_title('PCC vs. time window')
+    ax1.set_title('PCC vs. time window', fontweight='bold')
     ax1.set_ylabel('PCC')
     ax1.grid(True, linestyle='--', alpha=0.6)
     ax1.legend()
@@ -1482,7 +1558,7 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir):
     #individual models
     is_first_model = True
     for source in sources:
-        if source != 'mmm':
+        if source != 'multi model mean':
             if is_first_model:
                 ax2.plot(end_years, rmse_data.sel(source=source), color='lightgrey', linewidth=1, alpha=0.7, label='Individual models')
                 is_first_model = False
@@ -1490,9 +1566,9 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir):
                 ax2.plot(end_years, rmse_data.sel(source=source), color='lightgrey', linewidth=1, alpha=0.7)
     
     #multi-model mean
-    ax2.plot(end_years, rmse_data.sel(source='mmm'), color='black', linewidth=2.5, label='Multi-model mean')
+    ax2.plot(end_years, rmse_data.sel(source='multi model mean'), color='black', linewidth=2.5, label='Multi-model mean')
     
-    ax2.set_title('RMSE vs. time window')
+    ax2.set_title('RMSE vs. time window', fontweight='bold')
     ax2.set_ylabel('RMSE (mm/yr)')
     ax2.set_xlabel('End year of time window')
     ax2.grid(True, linestyle='--', alpha=0.6)
@@ -1502,7 +1578,7 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir):
 
     #title and save
     fig.suptitle('Model skill evolution with increasing data availability', fontsize=16, fontweight='bold')
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
     
     output_path = os.path.join(fig_dir, 'incrementing_window_skill.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -1535,6 +1611,7 @@ def plot_smoothing_sensitivity(smoothing_results, cmip_results, fig_dir):
     reference_data = smoothing_results.sel(sigma=0)
     region_mask = create_region_mask(reference_data, EXTENT)
     
+    mesh = None
     for i, (ax, sigma, title) in enumerate(zip(axes, sigmas, titles)):
 
         is_left = (i == 0)
@@ -1557,11 +1634,12 @@ def plot_smoothing_sensitivity(smoothing_results, cmip_results, fig_dir):
     fig.subplots_adjust(bottom=0.2)
 
     #colorbar
-    cbar_ax = fig.add_axes([0.25, 0.1, 0.5, 0.03])
-    cbar = fig.colorbar(mesh, cax=cbar_ax, orientation='horizontal')
-    cbar.locator = MaxNLocator(nbins=7, integer=True, prune='both')
-    cbar.update_ticks()
-    cbar.set_label('Trend (mm/yr)', fontsize=12)
+    cbar_ax = fig.add_axes((0.25, 0.1, 0.5, 0.03))
+    if mesh:
+        cbar = fig.colorbar(mesh, cax=cbar_ax, orientation='horizontal')
+        cbar.locator = MaxNLocator(nbins=7, integer=True, prune='both')
+        cbar.update_ticks()
+        cbar.set_label('Trend (mm/yr)', fontsize=12)
     
     #save
     output_path = os.path.join(fig_dir, 'smoothing_sensitivity_comparison.png')

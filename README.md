@@ -108,7 +108,7 @@ ODSL/
 
 ## Cache size
 
-Total cache size: ~5-10 GB
+Total cache size: ~10-20 GB
 First run: 30-60 minutes
 Cached runs: 1-5 minutes
 

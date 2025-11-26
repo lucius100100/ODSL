@@ -77,11 +77,11 @@ def load_altimetry_data():
         duacs_dir = os.path.join(data_path, "Altimetry")
 
     duacs_pattern = os.path.join(duacs_dir, 'cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1M-m_*.nc')
-    duacs_ds = xr.open_mfdataset(duacs_pattern, combine='by_coords').load()
+    duacs_ds = xr.open_mfdataset(duacs_pattern, combine='by_coords', chunks={'time': 12})
     duacs_ds = rotate_longitude(duacs_ds, 'longitude')
     duacs_ds['sla'] *= 100  #m to cm
 
-    print(f"Altimetry range: {duacs_ds.sla.min().item():.2f} to {duacs_ds.sla.max().item():.2f} cm/yr")
+    print(f"Altimetry data loaded.")
 
     return duacs_ds
 
@@ -96,6 +96,7 @@ def load_budget_data(extend_to_year=None):
             budget_dir = find_folder_by_name("Frederikse")
     except FileNotFoundError:
         print("Warning: Budget/Frederikse folder not found")
+        raise
 
     frederikse_file = os.path.join(budget_dir, 'total.nc')
     ds_frederikse = xr.open_dataset(frederikse_file)
@@ -154,7 +155,7 @@ def load_budget_data(extend_to_year=None):
         extended_data = xr.concat(extended_data_list, dim='year')
         asl_frederikse = xr.concat([asl_frederikse, extended_data], dim='year')
 
-    print(f"Budget data sea level range: {asl_frederikse.min().item():.2f} to {asl_frederikse.max().item():.2f} cm/yr")
+    print(f"Budget data sea level range: {asl_frederikse.min().item():.2f} to {asl_frederikse.max().item():.2f} mm")
 
     return asl_frederikse
 

@@ -10,7 +10,7 @@ START_YEAR                 = 1993              #observed period
 END_YEAR                   = 2024
 #EXTENT                     = [-65, 40, 50, 80] #North Atlantic (Richter et al., 2017)
 #EXTENT                     = [-100, 20, 8, 80] #North Atlantic
-EXTENT                     = [-100, 20, 0, 80] #North Atlantic until equator
+EXTENT                     = [-100, 40, 0, 80] #North Atlantic until equator
 USE_CACHE                  = True              #cache settings
 FORCE_RECOMPUTE            = False
 VARIABILITY_DETREND_DEGREE = 2                 #variability polynomial degree: 1=linear, 2=quadratic, etc...
@@ -18,9 +18,9 @@ PLOT_VARIABLE              = 'trend'     #what to plot: 'ODSL', 'trend', 'variab
 #ODSL not implemented fully yet!
 CMIP5_FUTURE_SCENARIO      = 'rcp45'           #CMIP future scenario to be used after historical
 CMIP6_FUTURE_SCENARIO      = 'ssp245'
-EOF_N_MODES                = 4                 #number of EOF modes to compute
+EOF_N_MODES                = 10                 #number of EOF modes to compute
 APPLY_SPATIAL_SMOOTHING    = False              #Gaussian smoothing altimetry dataset
-SPATIAL_SMOOTHING_SIGMA    = 3.0               #Gaussian smoothing sigma
+SPATIAL_SMOOTHING_SIGMA    = 9.0               #Gaussian smoothing sigma
 APPLY_NaN_INPAINTING_BUDGET = False            #apply NaN inpainting around margins of budget data
 
 PLOT_CONFIG = {

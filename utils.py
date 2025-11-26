@@ -20,6 +20,9 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.interpolate import griddata
 from scipy.ndimage import binary_dilation
+import regionmask
+import warnings
+import dask.base
 
 def setup_esmf_environment():
     """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported. See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
@@ -145,6 +148,8 @@ def cache_result(cache_key_prefix):
                                 #directory-based netcdf
                                 print(f"JSON serialization failed. Caching dictionary of xarray objects to directory: {dir_path}")
                                 dir_path.mkdir(parents=True, exist_ok=True)
+
+                                assert isinstance(result, dict)
                                 for key, ds in result.items():
                                     ds.to_netcdf(dir_path / f"{key}.nc")
                             
@@ -181,51 +186,61 @@ def convert_for_json(obj):
 
 def generate_arg_hash(*args, **kwargs):
     """Generates a short, deterministic SHA256 hash from function arguments, including complex objects like xarray and pandas."""
-    
+     
     hasher = hashlib.sha256()
 
     def update_hash(obj):
         
-        if isinstance(obj, xr.Dataset):
-
-            #xarray dataset
-            for var_name in sorted(obj.variables):
-                hasher.update(obj[var_name].values.tobytes())
+        if isinstance(obj, (xr.Dataset, xr.DataArray)):
+            #hash metadata and structure
+            
+            #dimensions and coordinates keys
+            hasher.update(str(obj.dims).encode('utf-8'))
+            hasher.update(str(list(obj.coords.keys())).encode('utf-8'))
+            
+            #attributes
             sorted_attrs = str(sorted(obj.attrs.items()))
             hasher.update(sorted_attrs.encode('utf-8'))
+            
+            #dask array, hash graph token, numpy array, hash bytes
+            if isinstance(obj, xr.Dataset):
 
-        elif isinstance(obj, xr.DataArray):
-    
-            #xarray dataarray
-            hasher.update(obj.values.tobytes())
-            for coord_name in sorted(obj.coords):
-                hasher.update(obj[coord_name].values.tobytes())
-            sorted_attrs = str(sorted(obj.attrs.items()))
-            hasher.update(sorted_attrs.encode('utf-8'))
+                for var_name in sorted(obj.data_vars):
+
+                    da = obj[var_name]
+                    if hasattr(da.data, 'dask'):
+
+                        #dask token
+                        hasher.update(str(dask.base.tokenize(da.data)).encode('utf-8'))
+                    else:
+                        hasher.update(da.values.tobytes())
+            else:
+
+                #dataarray
+                if hasattr(obj.data, 'dask'):
+                    hasher.update(str(dask.base.tokenize(obj.data)).encode('utf-8'))
+                else:
+                    hasher.update(obj.values.tobytes())
 
         elif isinstance(obj, pd.DataFrame):
 
-            #hash data, index, and columns
             hasher.update(obj.values.tobytes())
             hasher.update(obj.index.values.tobytes())
             hasher.update(obj.columns.values.tobytes())
 
         elif isinstance(obj, (tuple, list)):
 
-            #hash elements
             for item in obj:
                 update_hash(item)
 
         elif isinstance(obj, dict):
 
-            #hash key-value pairs
             for key, value in sorted(obj.items()):
+
                 update_hash(key)
                 update_hash(value)
 
         else:
-
-            #hash string
             hasher.update(str(obj).encode('utf-8'))
 
     #positional and keyword arguments
@@ -335,15 +350,70 @@ def calculate_weighted_stats(data_x, mask, data_y=None):
     return results
 
 def create_region_mask(data_array, extent):
-    """Create a mask for regionwide statistics for the North Atlantic region."""
+    """Create a mask for the North Atlantic region."""
 
-    lon_min, lon_max, lat_min, lat_max = extent
-    mask = ((data_array.longitude >= lon_min) & 
-            (data_array.longitude <= lon_max) & 
-            (data_array.latitude >= lat_min) & 
-            (data_array.latitude <= lat_max))
+    #normalize longitudes
+    lon = data_array.longitude.values
+    lat = data_array.latitude.values
+    lon_norm = ((lon + 180) % 360) - 180
+
+    #exclude ocean basins to include only North Atlantic
+    ocean_basins = regionmask.defined_regions.natural_earth_v5_1_2.ocean_basins_50
+    basin_mask_da = ocean_basins.mask(lon_norm, lat, wrap_lon=False)
+    basin_values = basin_mask_da.values
+
+    regions_to_exclude = [
+        #Pacific
+        3, 4, 109, 68,
+        #Mediterranean sea
+        25, 101, 103, 78, 64, 73, 82, 104,
+        #Black sea
+        7,
+        #Baltic sea
+        39, 72, 77, 65,
+        #Red sea
+        21, 62, 24,
+        #Hudson bay
+        17, 66
+    ]
+
+    geographic_mask = ~np.isin(basin_values, regions_to_exclude)
+
+    #exclude small other ocean basins
+    lon_2d, lat_2d = np.meshgrid(lon_norm, lat)
+
+    #Mediterranean (alboran, sirte, crete)
+    mask_med_leak = (lon_2d > -5.5) & (lat_2d < 42.5) & (lon_2d < 40) & (lat_2d > 30)
+    mask_med_leak2 = (lon_2d > 0) & (lat_2d < 45) & (lon_2d < 20) & (lat_2d > 30)
+    mask_med_leak3 = (lon_2d > 10) & (lat_2d < 45) & (lon_2d < 58) & (lat_2d > 30)
+    mask_med_leak4 = (lon_2d > 20) & (lat_2d < 50) & (lon_2d < 40) & (lat_2d > 40)
+    geographic_mask &= ~mask_med_leak
+    geographic_mask &= ~mask_med_leak2
+    geographic_mask &= ~mask_med_leak3
+    geographic_mask &= ~mask_med_leak4
+
+    #Baltic (gulf of riga)
+    mask_baltic_leak = (lon_2d > 14) & (lat_2d > 53) & (lat_2d < 63)
+    mask_baltic_leak2 = (lon_2d > 20) & (lat_2d > 60) & (lat_2d < 67)
+    geographic_mask &= ~mask_baltic_leak
+    geographic_mask &= ~mask_baltic_leak2
     
-    return mask
+    #extent mask
+    lon_min, lon_max, lat_min, lat_max = extent
+
+    lon_mask = (lon_norm >= lon_min) & (lon_norm <= lon_max)
+    lat_mask = (lat >= lat_min) & (lat <= lat_max)
+
+    extent_mask = lat_mask[:, np.newaxis] & lon_mask[np.newaxis, :]
+    
+    #combine masks
+    final_mask_values = geographic_mask & extent_mask
+
+    return xr.DataArray(
+        final_mask_values,
+        coords=data_array.coords,
+        dims=data_array.dims
+    )
 
 def detrend_timeseries(data_array, degree=1, dim='time'):
     """Detrending for variability calculation."""
@@ -352,12 +422,24 @@ def detrend_timeseries(data_array, degree=1, dim='time'):
     if not isinstance(degree, int) or degree < 0:
         raise ValueError(f"Degree must be a non-negative integer, but got {degree}.")
 
-    #fit polynomial
-    p = data_array.polyfit(dim=dim, deg=degree)
-    fit = xr.polyval(data_array[dim], p.polyfit_coefficients)
-    
-    #return residuals
-    return data_array - fit
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message='Polyfit may be poorly conditioned')
+
+        #fit polynomial
+        p = data_array.polyfit(dim=dim, deg=degree)
+        if 'polyfit_coefficients' in p.variables:
+            coeff_name = 'polyfit_coefficients'
+        else:
+            #sometimes ugly name, no idea why
+            coeff_name = f'__xarray_dataarray_variable___polyfit_coefficients'
+
+        coeffs = p[coeff_name]
+
+    fit = xr.polyval(data_array[dim], coeffs)
+
+    detrended = data_array - fit
+
+    return detrended
 
 def calculate_pc_index_correlations(pcs, indices_dict):
     """Helper function to correlate a single set of PCs with indices."""
@@ -418,4 +500,23 @@ def inpaint_nans(data_array):
     filled_array[fringe_mask] = interpolated_values
     
     return filled_array
+
+def remove_global_mean(data_array):
+    """Calculates and subtracts the area-weighted global mean."""
+    
+    if 'latitude' in data_array.coords:
+        lat_name = 'latitude'
+        lon_name = 'longitude'
+    elif 'lat' in data_array.coords:
+        lat_name = 'lat'
+        lon_name = 'lon'
+    else:
+        raise ValueError("Could not find latitude coordinates.")
+
+    weights = np.cos(np.deg2rad(data_array[lat_name]))
+    weights.name = "weights"
+    
+    global_mean = data_array.weighted(weights).mean(dim=(lat_name, lon_name))
+    
+    return data_array - global_mean
 
