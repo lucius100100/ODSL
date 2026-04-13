@@ -4,6 +4,8 @@
 Utility functions.
 """
 
+from config import ALPHA, VARIABILITY_DETREND_DEGREE
+
 import xarray as xr
 import pandas as pd
 import json
@@ -14,15 +16,15 @@ import hashlib
 import config
 import os
 import sys
-#from eofs.xarray import Eof
 import matplotlib.path as mpath
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from scipy.interpolate import griddata
-from scipy.ndimage import binary_dilation
+from scipy import stats
 import regionmask
 import warnings
 import dask.base
+from matplotlib.ticker import MaxNLocator
+from scipy import signal
 
 def setup_esmf_environment():
     """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported. See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
@@ -32,11 +34,10 @@ def setup_esmf_environment():
         env_path = Path(sys.prefix)
 
         #potential locations for esmf.mk
-        possible_paths = [
-            env_path / "lib" / "esmf.mk",            #Linux/macOS
-            env_path / "Lib" / "esmf.mk",            #Windows
-            env_path / "Library" / "lib" / "esmf.mk" #Windows
-        ]
+        possible_paths = [env_path / "lib" / "esmf.mk",            #Linux/macOS
+                          env_path / "Lib" / "esmf.mk",            #Windows
+                          env_path / "Library" / "lib" / "esmf.mk" #Windows
+                         ]
 
         #search for file
         found_path = None
@@ -50,9 +51,7 @@ def setup_esmf_environment():
             os.environ['ESMFMKFILE'] = str(found_path)
             print(f"ESMFMKFILE set to: {found_path}")
         else:
-            raise ImportError(
-                "Could not find 'esmf.mk' in the environment.\n" "The xesmf package installation may be incomplete or corrupted.\n" "Please try reinstalling it with: `conda install -c conda-forge xesmf`."
-            )
+            raise ImportError("Could not find 'esmf.mk' in the environment.\n" "The xesmf package installation may be incomplete or corrupted.")
 
 #cache directory
 CACHE_DIR = Path('./cache')
@@ -138,10 +137,7 @@ def cache_result(cache_key_prefix):
                         except TypeError:
 
                             #if JSON fails check for dict of xarray objects
-                            is_dict_of_datasets = (
-                                isinstance(result, dict) and result and
-                                all(isinstance(v, (xr.Dataset, xr.DataArray)) for v in result.values())
-                            )
+                            is_dict_of_datasets = (isinstance(result, dict) and result and all(isinstance(v, (xr.Dataset, xr.DataArray)) for v in result.values()))
                             
                             if is_dict_of_datasets:
                                 
@@ -205,7 +201,7 @@ def generate_arg_hash(*args, **kwargs):
             #dask array, hash graph token, numpy array, hash bytes
             if isinstance(obj, xr.Dataset):
 
-                for var_name in sorted(obj.data_vars):
+                for var_name in sorted(obj.data_vars):  # type: ignore
 
                     da = obj[var_name]
                     if hasattr(da.data, 'dask'):
@@ -282,6 +278,24 @@ def add_map_features(ax, extent, is_left=False, is_bottom=False):
     gl.left_labels = is_left
     gl.bottom_labels = is_bottom
 
+def make_aligned_levels(vmin, vmax, nbins=7, force_zero_min=False):
+    """Better align colorbar ticks to spatial plots contour levels."""
+
+    is_symmetric = (abs(vmin + vmax) < 1e-10 * max(abs(vmin), abs(vmax), 1))
+    locator = MaxNLocator(nbins=nbins, integer=(vmax - vmin >= 1), symmetric=is_symmetric)
+    major_ticks = np.array(locator.tick_values(vmin, vmax))
+
+    if force_zero_min:
+        major_ticks = major_ticks[major_ticks >= 0]
+
+    vmin = float(major_ticks[0])
+    vmax = float(major_ticks[-1])
+
+    n_minor = 8
+    levels = np.concatenate([np.linspace(major_ticks[i], major_ticks[i + 1], n_minor, endpoint=False) for i in range(len(major_ticks) - 1)] + [np.array([major_ticks[-1]])])
+
+    return levels, major_ticks, vmin, vmax
+
 def calculate_weighted_stats(data_x, mask, data_y=None):
     """Calculates area-weighted statistics based on the supplementary material 'Computation of metrics used in the analysis' from Richter et al. 2017."""
 
@@ -342,10 +356,24 @@ def calculate_weighted_stats(data_x, mask, data_y=None):
         #area weighted PCC
         pcc = unbiased_factor * np.sum(w * ((x - mu_x) * (y - mu_y))) / (std_x * std_y)
         
-        results.update({
-            'mean_y': mu_y.item(), 'std_y': std_y.item(),
-            'rmse': rmse.item(), 'pcc': pcc.item()
-        })
+        #bias
+        bias = mu_x - mu_y
+
+        #sign agreement excluding 0
+        nonzero_mask = (x != 0) & (y != 0)
+
+        if nonzero_mask.sum() > 0:
+            x_nz = x.where(nonzero_mask, drop=True)
+            y_nz = y.where(nonzero_mask, drop=True)
+            w_nz = w.where(nonzero_mask, drop=True)
+            w_nz = w_nz / w_nz.sum() 
+            sign_match = (np.sign(x_nz) == np.sign(y_nz)).astype(float)
+            sign_agreement = np.sum(w_nz * sign_match)
+
+        else:
+            sign_agreement = np.nan
+
+        results.update({'mean_y': mu_y.item(), 'std_y': std_y.item(), 'rmse': rmse.item(), 'pcc': pcc.item(), 'bias': bias.item(), 'sign_agreement': float(sign_agreement)})
         
     return results
 
@@ -362,20 +390,18 @@ def create_region_mask(data_array, extent):
     basin_mask_da = ocean_basins.mask(lon_norm, lat, wrap_lon=False)
     basin_values = basin_mask_da.values
 
-    regions_to_exclude = [
-        #Pacific
-        3, 4, 109, 68,
-        #Mediterranean sea
-        25, 101, 103, 78, 64, 73, 82, 104,
-        #Black sea
-        7,
-        #Baltic sea
-        39, 72, 77, 65,
-        #Red sea
-        21, 62, 24,
-        #Hudson bay
-        17, 66
-    ]
+    regions_to_exclude = [#Pacific
+                          3, 4, 109, 68,
+                          #Mediterranean sea
+                          25, 101, 103, 78, 64, 73, 82, 104,
+                          #Black sea
+                          7,
+                          #Baltic sea
+                          39, 72, 77, 65,
+                          #Red sea
+                          21, 62, 24,
+                          #Hudson bay
+                          17, 66]
 
     geographic_mask = ~np.isin(basin_values, regions_to_exclude)
 
@@ -397,6 +423,10 @@ def create_region_mask(data_array, extent):
     mask_baltic_leak2 = (lon_2d > 20) & (lat_2d > 60) & (lat_2d < 67)
     geographic_mask &= ~mask_baltic_leak
     geographic_mask &= ~mask_baltic_leak2
+
+    #North Canada
+    mask_North_Canada = (lon_2d < -90) & (lat_2d > 66) & (lat_2d < 90)
+    geographic_mask &= ~mask_North_Canada
     
     #extent mask
     lon_min, lon_max, lat_min, lat_max = extent
@@ -409,11 +439,7 @@ def create_region_mask(data_array, extent):
     #combine masks
     final_mask_values = geographic_mask & extent_mask
 
-    return xr.DataArray(
-        final_mask_values,
-        coords=data_array.coords,
-        dims=data_array.dims
-    )
+    return xr.DataArray(final_mask_values, coords=data_array.coords, dims=data_array.dims)
 
 def detrend_timeseries(data_array, degree=1, dim='time'):
     """Detrending for variability calculation."""
@@ -463,44 +489,6 @@ def calculate_pc_index_correlations(pcs, indices_dict):
 
     return correlations
 
-def inpaint_nans(data_array):
-    """Fills NaN values that are adjacent to valid data points."""
-    
-    #mask
-    valid_mask = ~np.isnan(data_array)
-    
-    #check full or empty
-    if valid_mask.all() or not valid_mask.any():
-        return data_array
-
-    #binary_dilation expands the valid_mask by one pixel in all directions, subtracting original mask, left are pixels around margins
-    fringe_mask = binary_dilation(valid_mask) & ~valid_mask
-
-    #coordinates for interpolation
-    x = np.arange(0, data_array.shape[1])
-    y = np.arange(0, data_array.shape[0])
-    xx, yy = np.meshgrid(x, y)
-
-    #source points
-    valid_points = np.array([xx[valid_mask], yy[valid_mask]]).T
-    valid_values = data_array[valid_mask]
-    
-    #target points
-    points_to_interpolate = np.array([xx[fringe_mask], yy[fringe_mask]]).T
-    
-    #safety check
-    if points_to_interpolate.size == 0:
-        return data_array
-
-    #nearest neighbor interpolation
-    interpolated_values = griddata(valid_points, valid_values, points_to_interpolate, method='nearest')
-
-    #copy and fill margin cells
-    filled_array = data_array.copy()
-    filled_array[fringe_mask] = interpolated_values
-    
-    return filled_array
-
 def remove_global_mean(data_array):
     """Calculates and subtracts the area-weighted global mean."""
     
@@ -520,3 +508,146 @@ def remove_global_mean(data_array):
     
     return data_array - global_mean
 
+def estimate_temporal_autocorrelation(timeseries):
+    """Estimate lag-1 autocorrelation for red noise generation."""
+
+    #lag-1 correlation at each grid point
+    ts_t0 = timeseries.isel(time=slice(None, -1))
+    ts_t1 = timeseries.isel(time=slice(1, None))
+    
+    #reset time
+    ts_t1 = ts_t1.assign_coords(time=ts_t0.time)
+    
+    #pearson correlation
+    numerator = ((ts_t0 - ts_t0.mean('time')) * (ts_t1 - ts_t1.mean('time'))).mean('time')
+    denominator = ts_t0.std('time') * ts_t1.std('time')
+    
+    lag1_corr = numerator / denominator
+    
+    #spatial mean
+    return float(lag1_corr.mean(skipna=True))
+
+def generate_red_noise_field(data_template, alpha, seed=None):
+    """Red noise field with AR(1) temporal structure."""
+    
+    if seed is not None:
+        np.random.seed(seed)
+    
+    nt = data_template.sizes['time']
+    spatial_shape = [data_template.sizes[d] for d in data_template.dims if d != 'time']
+    
+    #white noise
+    noise = np.random.randn(nt, *spatial_shape)
+    
+    #AR(1): X(t) = alpha * X(t-1) + sqrt(1-alpha^2) * epsilon(t)
+    red_noise = np.zeros_like(noise)
+    red_noise[0] = noise[0]
+    
+    scaling = np.sqrt(1 - alpha**2)
+    for t in range(1, nt):
+        red_noise[t] = alpha * red_noise[t-1] + scaling * noise[t]
+    
+    #DataArray
+    coords = {dim: data_template[dim] for dim in data_template.dims}
+    red_noise_da = xr.DataArray(red_noise, coords=coords, dims=data_template.dims)
+    
+    #NaN mask
+    red_noise_da = red_noise_da.where(data_template.notnull().any('time'))
+    
+    return red_noise_da
+
+def compute_field_significance(data, plot_var, region_mask=None, alpha=ALPHA):
+    """Compute significance statistics for a spatial field from a time series."""
+
+    #time dimension
+    if 'time' in data.dims:
+        time_dim = 'time'
+    elif 'year' in data.dims:
+        time_dim = 'year'
+    else:
+        raise ValueError(f"No 'time' or 'year' dimension found in data. Dims: {data.dims}")
+
+    n_t = data.sizes[time_dim]
+    time_vals = data[time_dim].values
+    result = {}
+
+    if plot_var == 'trend':
+        #linear trend and significance
+        trend_coeffs = data.polyfit(dim=time_dim, deg=1)
+        slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
+        field = slope * 10  #mm/yr
+
+        #residuals and standard error of slope 
+        fitted = xr.polyval(data[time_dim], trend_coeffs.polyfit_coefficients)
+        residuals = data - fitted
+        sse = (residuals**2).sum(dim=time_dim)
+        ssx = np.sum((time_vals.astype(float) - np.mean(time_vals.astype(float)))**2)
+        se_slope = np.sqrt(sse / (n_t - 2)) / np.sqrt(ssx)
+
+        #t-test
+        df = n_t - 2
+        t_stat = slope / se_slope
+        p_values = 2 * stats.t.sf(np.abs(t_stat.values), df=df)
+        p_val = xr.DataArray(p_values, coords=slope.coords, dims=slope.dims)
+
+        #CI
+        t_crit = stats.t.ppf(1 - alpha / 2, df=df)
+        ci_lower = slope - t_crit * se_slope
+        ci_upper = slope + t_crit * se_slope
+
+        result = {'field': field, 'std_error': (se_slope * 10), 'p_value': p_val, 'ci_lower': ci_lower, 'ci_upper': ci_upper}
+
+    elif plot_var == 'variability':
+        #std dev and chi-square CI
+        detrended = detrend_timeseries(data, degree=VARIABILITY_DETREND_DEGREE, dim=time_dim)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            field = detrended.std(dim=time_dim)
+
+        se = field / np.sqrt(2 * (n_t - 1))
+
+        df = n_t - 1
+        chi2_lo = stats.chi2.ppf(alpha / 2, df)
+        chi2_hi = stats.chi2.ppf(1 - alpha / 2, df)
+        var_sq = field ** 2
+        ci_lower = np.sqrt((df * var_sq) / chi2_hi)
+        ci_upper = np.sqrt((df * var_sq) / chi2_lo)
+
+        result = {'field': field, 'std_error': se, 'ci_lower': ci_lower, 'ci_upper': ci_upper}
+
+    elif plot_var == 'ODSL':
+        #mean and t-test
+        field = data.mean(dim=time_dim)
+        temporal_std = data.std(dim=time_dim)
+        se = temporal_std / np.sqrt(n_t)
+
+        df = n_t - 1
+        t_stat = field * np.sqrt(n_t) / temporal_std
+        p_values = 2 * stats.t.sf(np.abs(t_stat.values), df=df)
+        p_val = xr.DataArray(p_values, coords=field.coords, dims=field.dims)
+
+        t_crit = stats.t.ppf(1 - alpha / 2, df=df)
+        ci_lower = field - t_crit * se
+        ci_upper = field + t_crit * se
+
+        result = {'field': field, 'std_error': se, 'p_value': p_val, 'ci_lower': ci_lower, 'ci_upper': ci_upper}
+
+    else:
+        raise ValueError(f"Unknown plot_var: {plot_var}. Must be 'trend', 'variability', or 'ODSL'.")
+
+    #region mask
+    if region_mask is not None:
+        result = {k: v.where(region_mask) if isinstance(v, xr.DataArray) else v for k, v in result.items()}
+
+    return result
+
+def calculate_power_spectrum(pc_timeseries):
+    """Calculate the Power Spectral Density (PSD)."""
+
+    data = pc_timeseries.dropna(dim='time').values
+    
+    #standardize
+    data         = (data - np.mean(data)) / np.std(data)
+    freqs, power = signal.periodogram(data, fs=1.0, window='boxcar', detrend='linear', scaling='density')
+
+    return xr.DataArray(power, coords={'frequency': freqs}, dims='frequency', name='power_spectrum')

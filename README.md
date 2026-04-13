@@ -31,7 +31,9 @@ rm -rf cache/*
 - **Observational ODSL calculation**: Combines altimetry, geoid, and GIA data
 - **CMIP model analysis**: Processes CMIP5 and CMIP6 models (historical + future scenario)
 - **Model-observation comparison**: Calculates Pattern Correlation Coefficient (PCC) and Root Mean Square Error (RMSE)
-- **Sliding window analysis**: Identifies best-matching periods with a window size of max 31 years (1993-2024)
+- **Sliding window analysis**: Identifies best-matching periods with a window size of max 32 years (1850-2024)
+- **Incrementing window analysis**: Identifies incrementing best-matching periods with a window size of max 32 years (1993-2024)
+- **EOF analysis**: Breakdown of observational and modelled data into modes of maximum variance
 - **Ensemble statistics**: Creates multi-model ensemble means
 - **Visualization**: Generates publication-quality figures
 
@@ -59,6 +61,12 @@ rm -rf cache/*
    - Scenarios: historical, RCP2.6, RCP4.5, RCP8.5
    - [Preprocessing Code](https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py)
 
+5. **Wind data (Hersbach et al., 2023)**
+   - Source: Copernicus Climate Change Service (C3S) ERA5
+   - DOI: 10.24381/cds.f17050d7
+   - Files: `*.nc` (monthly averaged data on single levels containing `avg_iews` and `avg_inss` surface stress variables)
+   - [Download Link](https://doi.org/10.24381/cds.f17050d7)
+
 ### Data directory structure
 
 ```text
@@ -71,18 +79,26 @@ Data/
 │   └── GIA/
 │       ├── drad.1grid_O512.nc
 │       └── dsea.1grid_O512.nc
-└── CMIP/
-    ├── CMIP5/
-    │   ├── cmip5_zos_historical/
-    │   ├── cmip5_zos_rcp26/
-    │   ├── cmip5_zos_rcp45/
-    │   └── cmip5_zos_rcp85/
-    └── CMIP6/
-        ├── cmip6_zos_historical/
-        ├── cmip6_zos_ssp126/
-        ├── cmip6_zos_ssp245/
-        └── cmip6_zos_ssp585/
-```
+├── CMIP/
+│   ├── CMIP5/
+│   │   ├── cmip5_zos_historical/
+│   │   ├── cmip5_zos_rcp26/
+│   │   ├── cmip5_zos_rcp45/
+│   │   └── cmip5_zos_rcp85/
+│   └── CMIP6/
+│       ├── cmip6_zos_historical/
+│       ├── cmip6_zos_piControl/
+│       ├── cmip6_zos_ssp126/
+│       ├── cmip6_zos_ssp245/
+│       └── cmip6_zos_ssp585/
+├── Modes/
+│   ├── AMO/
+│   │   └── AMO_monthly.txt
+│   ├── AO/
+│   │   └── AO_monthly.txt
+│   └── tele_index.txt
+└── Wind/
+    └── data_stream-moda_stepType-avgad.nc
 
 ## Installation
 
@@ -108,8 +124,9 @@ ODSL/
 
 ## Cache size
 
-Total cache size: ~10-20 GB
-First run: 30-60 minutes
+Total data size: ~50 GB
+Total cache size: ~20 GB
+First run (all options): 4-8 hours
 Cached runs: 1-5 minutes
 
 ## License
@@ -148,20 +165,24 @@ If you use this code in your research, please cite:
 @software{odsl_analysis_2025,
   author = {Luc van Dijk},
   title = {Ocean Dynamic Sea Level (ODSL) Analysis},
-  year = {2025},
+  year = {2026},
   url = {https://github.com/lucius100100/ODSL}
 }
 ```
 
-## Data references
+## References
 
 1. **Richter, K., Øie Nilsen, J. E., Raj, R. P., Bethke, I., Johannessen, J. A., Slangen, A. B., & Marzeion, B. (2017)**. Northern North Atlantic sea level in CMIP5 climate models: evaluation of mean state, variability, and trends against altimetric observations. *Journal of Climate*, 30(23), 9383-9398.
 
-2. **Frederikse, T., Landerer, F., Caron, L., et al. (2020)**. The causes of sea-level rise since 1900. *Nature*, 584(7821), 393-397.
+2. **Copernicus Marine Service**. Global Ocean Gridded L4 Sea Surface Heights and Derived Variables. DOI:[10.48670/moi-00148](https://doi.org/10.48670/moi-00148). [Data available here](https://data.marine.copernicus.eu/product/SEALEVEL_GLO_PHY_L4_MY_008_047/description).
 
-3. **Peltier, W. R., Argus, D. F., & Drummond, R. (2015)**. Space geodesy constrains ice age terminal deglaciation: The global ICE‐6G_C (VM5a) model. *Journal of Geophysical Research: Solid Earth*, 120(1), 450-487.
+3. **Frederikse, T., Landerer, F., Caron, L., et al. (2020)**. The causes of sea-level rise since 1900. *Nature*, 584(7821), 393-397.[Data available here](https://zenodo.org/records/3862995).
 
-4. **Le Bars, D. (2018)**. Uncertainty in sea level rise projections due to the dependence between contributors. *Earth's Future*, 6(9), 1275-1291.
+4. **Peltier, W. R., Argus, D. F., & Drummond, R. (2015)**. Space geodesy constrains ice age terminal deglaciation: The global ICE‐6G_C (VM5a) model. *Journal of Geophysical Research: Solid Earth*, 120(1), 450-487. [Data available here](https://www.atmosp.physics.utoronto.ca/~peltier/data.php).
+
+5. **Hersbach, H., Bell, B., Berrisford, P., et al. (2023)**. ERA5 monthly averaged data on single levels from 1940 to present. *Copernicus Climate Change Service (C3S) Climate Data Store (CDS)*. DOI:[10.24381/cds.f17050d7](https://doi.org/10.24381/cds.f17050d7).
+
+6. **Le Bars, D.** CMIP Sea Level Preprocessing Code. *KNMI*.[Code available on GitHub](https://github.com/dlebars/CMIP_SeaLevel/blob/master/code/PreparePlaneVariables.py).
 
 ## Contact
 
