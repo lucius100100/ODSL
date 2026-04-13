@@ -14,3 +14,4 @@ test_mask.py
 dependencies.py
 dependencies_overview.txt
 Latex/
+.vscode/
