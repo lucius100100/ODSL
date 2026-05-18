@@ -5,9 +5,9 @@ Execute the full ODSL calculations / analysis and plotting.
 """
 
 from data_loader import (load_altimetry_data, load_budget_data, load_gia_data, load_cmip_model_data, get_cmip_files_inventory, load_climate_indices_dict, load_wind_stress_data)
-from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries, calculate_pc_index_correlations, remove_global_mean, estimate_temporal_autocorrelation, generate_red_noise_field,compute_field_significance, calculate_power_spectrum)
+from utils import (setup_esmf_environment, cache_result, calculate_weighted_stats, create_region_mask, detrend_timeseries, calculate_pc_index_correlations, remove_global_mean, calculate_single_eof, monte_carlo_significance_test, compute_field_significance, calculate_power_spectrum)
 from plotting import create_all_figures 
-from config import (CMIP_VERSION, PROCESS_ALL_SCENARIOS, START_YEAR, END_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO, PROCESS_PICONTROL, N_MODES_OBSERVED, APPLY_SPATIAL_SMOOTHING, SPATIAL_SMOOTHING_SIGMA, ALPHA, USE_ROTATED_EOF, MONTE_CARLO_SIGNIFICANCE_TEST, N_REALIZATIONS_MONTE_CARLO, EOF_N_MODES)
+from config import (CMIP_VERSION, PROCESS_ALL_SCENARIOS, START_YEAR, END_YEAR, SLIDING_START_YEAR, EXTENT, TARGET_CMIP5_MODELS, TARGET_CMIP6_MODELS, VARIABILITY_DETREND_DEGREE, CMIP_SCENARIOS, CMIP5_FUTURE_SCENARIO, CMIP6_FUTURE_SCENARIO, PROCESS_PICONTROL, N_MODES_OBSERVED, APPLY_SPATIAL_SMOOTHING, SPATIAL_SMOOTHING_SIGMA, ALPHA, USE_ROTATED_EOF, MONTE_CARLO_SIGNIFICANCE_TEST, N_REALIZATIONS_MONTE_CARLO, EOF_N_MODES)
 
 #setup_esmf_environment()
 
@@ -21,8 +21,6 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeEl
 import warnings
 import time
 from scipy import stats
-from xeofs.single import EOF, EOFRotator
-from typing import cast
 from datetime import datetime
 
 #correct configuration
@@ -138,7 +136,7 @@ def calculate_observed_odsl():
     print("Removing global mean...")
     
     #apply removal global mean (to obtain regional ODSL per definition)
-    odsl_mm_yr = remove_global_mean(odsl_mm_yr)
+    odsl_mm_yr  = remove_global_mean(odsl_mm_yr)
 
     #select north atlantic only
     region_mask = create_region_mask(trend_sla_alt_mm_yr, EXTENT)
@@ -175,7 +173,7 @@ def calculate_observed_odsl():
     
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
-    observed_variability = detrended_odsl.std(dim='year') / 10    #mm -> cm
+        observed_variability = detrended_odsl.std(dim='year') / 10    #mm -> cm
 
     #select north atlantic only
     observed_variability = observed_variability.where(region_mask)
@@ -195,21 +193,21 @@ def calculate_observed_odsl():
     print("Computing statistical significance...")
 
     #trend
-    trend_sig = compute_field_significance(odsl_yearly_fields, 'trend', region_mask=region_mask)
+    trend_sig           = compute_field_significance(odsl_yearly_fields, 'trend', region_mask=region_mask)
     odsl_trend_se       = trend_sig['std_error']
     odsl_trend_p_val    = trend_sig['p_value']
     odsl_trend_ci_lower = trend_sig['ci_lower']
     odsl_trend_ci_upper = trend_sig['ci_upper']
 
     #variability
-    var_sig = compute_field_significance(odsl_yearly_fields, 'variability', region_mask=region_mask)
+    var_sig              = compute_field_significance(odsl_yearly_fields, 'variability', region_mask=region_mask)
     observed_variability = var_sig['field'] / 10  #mm -> cm
     variability_se       = var_sig['std_error'] / 10
     variability_ci_lower = var_sig['ci_lower'] / 10
     variability_ci_upper = var_sig['ci_upper'] / 10
 
     #mean ODSL
-    odsl_mean_sig = compute_field_significance(odsl_yearly_fields, 'ODSL', region_mask=region_mask)
+    odsl_mean_sig        = compute_field_significance(odsl_yearly_fields, 'ODSL', region_mask=region_mask)
     odsl_mean_se_m       = odsl_mean_sig['std_error'] / 10  #mm -> cm
     odsl_mean_p_val_m    = odsl_mean_sig['p_value']
     odsl_mean_ci_lower_m = odsl_mean_sig['ci_lower'] / 10
@@ -573,14 +571,14 @@ def process_all_cmip_scenarios(default_result=None):
     cmip6_all = {}
 
     if default_result is not None:
-        default_scenario = CMIP5_FUTURE_SCENARIO if CMIP_VERSION == 'CMIP5' else CMIP6_FUTURE_SCENARIO
-        target = cmip5_all if CMIP_VERSION == 'CMIP5' else cmip6_all
+        default_scenario         = CMIP5_FUTURE_SCENARIO if CMIP_VERSION == 'CMIP5' else CMIP6_FUTURE_SCENARIO
+        target                   = cmip5_all if CMIP_VERSION == 'CMIP5' else cmip6_all
         target[default_scenario] = default_result
 
     for scen in ['rcp26', 'rcp45', 'rcp85']:
         if scen not in cmip5_all:
-            globals()['CMIP_VERSION'] = 'CMIP5'
-            globals()['TARGET_MODELS'] = TARGET_CMIP5_MODELS
+            globals()['CMIP_VERSION']    = 'CMIP5'
+            globals()['TARGET_MODELS']   = TARGET_CMIP5_MODELS
             globals()['FUTURE_SCENARIO'] = scen
             try:
                 try:
@@ -592,8 +590,8 @@ def process_all_cmip_scenarios(default_result=None):
 
     for scen in ['ssp126', 'ssp245', 'ssp585']:
         if scen not in cmip6_all:
-            globals()['CMIP_VERSION'] = 'CMIP6'
-            globals()['TARGET_MODELS'] = TARGET_CMIP6_MODELS
+            globals()['CMIP_VERSION']    = 'CMIP6'
+            globals()['TARGET_MODELS']   = TARGET_CMIP6_MODELS
             globals()['FUTURE_SCENARIO'] = scen
             try:
                 try:
@@ -1031,7 +1029,7 @@ def perform_sliding_window_analysis():
 
         #slide window
         window_size = END_YEAR - START_YEAR + 1
-        start_year  = int(cmip_results_ds.full_timeseries.time.min().item())
+        start_year  = max(int(cmip_results_ds.full_timeseries.time.min().item()), SLIDING_START_YEAR)
         end_year    = END_YEAR
         
         for window_start in range(start_year, end_year - window_size + 2):
@@ -1519,6 +1517,7 @@ def process_cmip_scenario_data():
             model_odsl_list        = []
             model_trend_list       = []
             model_variability_list = []
+            valid_model_names      = []
             
             #loop over each model
             for model_name in target_models:
@@ -1541,9 +1540,11 @@ def process_cmip_scenario_data():
                     #remove global mean prior to masking North Atlantic
                     combined_zos = remove_global_mean(combined_zos)
                     
-                    #North Atlantic region and regional mean
-                    region_mask = create_region_mask(combined_zos.isel(time=0), EXTENT)
-                    regional_ts = combined_zos.where(region_mask).mean(dim=['latitude', 'longitude'])
+                    #North Atlantic region and weighted regional mean
+                    region_mask  = create_region_mask(combined_zos.isel(time=0), EXTENT)
+                    weights      = np.cos(np.deg2rad(combined_zos.latitude))
+                    weights.name = "weights"
+                    regional_ts  = combined_zos.where(region_mask).weighted(weights).mean(dim=['latitude', 'longitude'])
                     
                     #convert to mm and rename time to year
                     regional_ts_mm = regional_ts * 10
@@ -1562,6 +1563,7 @@ def process_cmip_scenario_data():
                     model_odsl_list.append(odsl_ts)
                     model_trend_list.append(trend_ts)
                     model_variability_list.append(variability_ts)
+                    valid_model_names.append(model_name)
                     
                 except Exception as e:
                     print(f"Could not process model {model_name} for scenario {scenario}: {e}")
@@ -1569,7 +1571,7 @@ def process_cmip_scenario_data():
             #concatenate 
             if model_odsl_list:
                 n_models  = len(model_odsl_list)
-                model_dim = pd.Index([f"model_{i}" for i in range(n_models)], name='model')
+                model_dim = pd.Index(valid_model_names, name='model')
                 
                 odsl_ensemble        = xr.concat(model_odsl_list, dim=model_dim)
                 trend_ensemble       = xr.concat(model_trend_list, dim=model_dim)
@@ -1581,6 +1583,7 @@ def process_cmip_scenario_data():
                                                           'trend_ensemble_std':        trend_ensemble.std(dim='model', skipna=True),
                                                           'variability_ensemble_mean': variability_ensemble.mean(dim='model', skipna=True), #variability (mm)
                                                           'variability_ensemble_std':  variability_ensemble.std(dim='model', skipna=True),
+                                                          'odsl_per_model':            odsl_ensemble,
                                                           'n_models':                  n_models}) #model count
                 
                 print(f"Processed {n_models} models for {scenario}")
@@ -1612,96 +1615,6 @@ def process_cmip_scenario_data():
     print(f"Successfully processed timeseries for {len(final_results)} CMIP versions")
 
     return combined_results
-
-def calculate_single_eof(data_array, n_modes=N_MODES_OBSERVED):
-    """Helper function to perform EOF analysis on a single DataArray."""
-
-    #weird n_modes discrepancy
-    n_samples = data_array.sizes['time']
-    if n_modes is None:
-        target_modes = n_samples
-    else:
-        target_modes = n_modes
-
-    actual_modes = min(n_samples, target_modes)
-
-    #check
-    if n_samples < 3:
-        print(f"Skipping EOF; not enough time steps ({n_samples})")
-        return None
-    
-    valid_mask = data_array.notnull().all(dim='time')
-    data_array = data_array.where(valid_mask)
-        
-    model = EOF(n_modes=actual_modes, use_coslat=True)
-    model.fit(data_array, dim='time')
-
-    if USE_ROTATED_EOF:
-
-        #varimax rotation
-        rotator = EOFRotator(n_modes=actual_modes)
-        rotator.fit(model)
-
-        eofs               = cast(xr.DataArray, rotator.components())
-        pcs                = cast(xr.DataArray, rotator.scores())
-        variance_fractions = cast(xr.DataArray, rotator.explained_variance_ratio())
-        method             = 'Rotated EOF (Varimax) via xeofs'
-
-    else:    
-
-        #normal EOF
-        eofs               = cast(xr.DataArray, model.components())
-        pcs                = cast(xr.DataArray, model.scores())
-        variance_fractions = cast(xr.DataArray, model.explained_variance_ratio())
-        method             = 'Unrotated EOF via xeofs'
-    
-    new_mode_coords      = np.arange(actual_modes)
-    eofs                 = eofs.assign_coords(mode=new_mode_coords)
-    pcs                  = pcs.assign_coords(mode=new_mode_coords)
-    variance_fractions   = variance_fractions.assign_coords(mode=new_mode_coords)
-    eofs.attrs['method'] = method
-
-    #remove standard attributes that are not cachable (dictionaries)
-    unserializable_attrs = ['solver_kwargs', 'solver', 'sample_name', 'feature_name']
-    for da in [eofs, pcs, variance_fractions]:
-        for attr in unserializable_attrs:
-            da.attrs.pop(attr, None)
-
-    return xr.Dataset({'eofs': eofs, 'pcs': pcs, 'variance_fractions': variance_fractions})
-
-def monte_carlo_significance_test(data_array, n_realizations=500, n_modes=None, alpha=None):
-    """Monte Carlo significance test against red noise."""
-
-    print(f"Running Monte Carlo test ({n_realizations} realizations)...")
-    
-    #calculate AR(1) alpha
-    if alpha is None:
-        alpha = estimate_temporal_autocorrelation(data_array)
-        print(f"Estimated lag-1 autocorrelation: {alpha:.3f}")
-    
-    #number of modes
-    if n_modes is None:
-        n_modes = min(data_array.sizes['time'], 10)
-    
-    #eigenvalues from all realizations
-    synthetic_lambdas = np.zeros((n_realizations, n_modes))
-    
-    for i in range(n_realizations):
-        synthetic_data = generate_red_noise_field(data_array, alpha, seed=i)
-        synthetic_eof  = calculate_single_eof(synthetic_data, n_modes=n_modes)
-        
-        if synthetic_eof is not None:
-            synthetic_lambdas[i, :] = synthetic_eof['variance_fractions'].values
-    
-    percentile_95 = np.percentile(synthetic_lambdas, 95, axis=0)
-    percentile_99 = np.percentile(synthetic_lambdas, 99, axis=0)
-    
-    result = xr.Dataset({'mc_threshold_95': (['mode'], percentile_95), 'mc_threshold_99': (['mode'], percentile_99), 'synthetic_lambdas': (['realization', 'mode'], synthetic_lambdas)})
-    
-    result.attrs['n_realizations'] = n_realizations
-    result.attrs['alpha']          = alpha
-    
-    return result
 
 @cache_result('eof_analysis_results')
 def perform_eof_analysis(cmip_results, sliding_results, n_modes=N_MODES_OBSERVED):
@@ -1911,7 +1824,7 @@ def correlate_with_indices(all_eof_results):
 
 @cache_result('dual_eof_comparison_results')
 def perform_dual_eof_comparison(cmip_results, sliding_results, n_modes=N_MODES_OBSERVED):
-    """Comparison unrotated and rotated EOF"""
+    """Comparison unrotated and rotated EOF (1993-2024)."""
 
     global USE_ROTATED_EOF
     original_setting = USE_ROTATED_EOF
@@ -1991,6 +1904,72 @@ def perform_dual_eof_comparison(cmip_results, sliding_results, n_modes=N_MODES_O
             all_results[f'multi model mean__{eof_type}'] = mmm_ds
 
     print("Dual EOF comparison complete.\n")
+    return all_results
+
+@cache_result('dual_eof_comparison_results_historical')
+def perform_dual_eof_comparison_historical(cmip_results, n_modes=N_MODES_OBSERVED):
+    """Comparison unrotated and rotated EOF (1850-2024)."""
+
+    global USE_ROTATED_EOF
+    original_setting = USE_ROTATED_EOF
+
+    print("\nPerforming dual EOF comparison over historical period (1850-END_YEAR)...")
+
+    lon_min, lon_max, lat_min, lat_max = EXTENT
+    lat_slice = slice(lat_min, lat_max)
+    lon_slice = slice(lon_min, lon_max)
+
+    model_full_ts         = cmip_results['full_timeseries'].sel(time=slice(1850, END_YEAR))
+    model_full_ts['time'] = model_full_ts['time'].astype(int)
+    model_detrended       = detrend_timeseries(model_full_ts, degree=VARIABILITY_DETREND_DEGREE, dim='time')
+    model_mask            = create_region_mask(model_detrended.isel(time=0, model=0), EXTENT)
+
+    sources_to_analyze = {
+        m: model_detrended.sel(model=m).where(model_mask)
+        for m in model_detrended.model.values
+    }
+
+    all_results = {}
+    for name, data_array in sources_to_analyze.items():
+        print(f"Analyzing source (historical): {name} ...")
+        try:
+            data_regional = data_array.sel(latitude=lat_slice, longitude=lon_slice)
+
+            USE_ROTATED_EOF = False
+            unrotated_ds    = calculate_single_eof(data_regional, n_modes)
+            USE_ROTATED_EOF = True
+            rotated_ds      = calculate_single_eof(data_regional, n_modes)
+
+            if unrotated_ds is not None and rotated_ds is not None:
+                all_results[f'{name}__unrotated'] = unrotated_ds
+                all_results[f'{name}__rotated']   = rotated_ds
+        except Exception as e:
+            print(f"Could not perform historical dual EOF for {name}: {e}")
+
+    USE_ROTATED_EOF = original_setting
+
+    #multi-model mean
+    model_keys = list(sources_to_analyze.keys())
+    for eof_type in ['unrotated', 'rotated']:
+        eofs_list, pcs_list, vars_list = [], [], []
+        for name in model_keys:
+            key = f'{name}__{eof_type}'
+            if key not in all_results:
+                continue
+            res = all_results[key]
+            eofs_list.append(res['eofs'].copy().drop_vars('model', errors='ignore').expand_dims(dim={'model': [name]}))
+            pcs_list.append( res['pcs'].copy().drop_vars('model', errors='ignore').expand_dims(dim={'model': [name]}))
+            vars_list.append(res['variance_fractions'].copy().drop_vars('model', errors='ignore').expand_dims(dim={'model': [name]}))
+
+        if eofs_list:
+            mmm_ds = xr.Dataset({
+                'eofs':               xr.concat(eofs_list, dim='model').mean(dim='model'),
+                'pcs':                xr.concat(pcs_list,  dim='model').mean(dim='model'),
+                'variance_fractions': xr.concat(vars_list, dim='model').mean(dim='model'),
+            })
+            all_results[f'multi model mean__{eof_type}'] = mmm_ds
+
+    print("Historical dual EOF comparison complete.\n")
     return all_results
 
 @cache_result('spectral_analysis_results')
@@ -2116,21 +2095,22 @@ def main():
     r = {}
 
     #description, function, result keys
-    pipeline = [("Calculating the observed ODSL",                     lambda: calculate_observed_odsl(),                                                                                 'obs_results'),
-                ("Smoothing comparison",                              lambda: calculate_smoothing_sensitivity(),                                                                         'smoothing_results'),
-                ("Finding valid CMIP models",                         lambda: valid_models_table(),                                                                                      'models_df'),
-                ("Processing CMIP models",                            lambda: process_cmip_models(),                                                                                     'cmip_results'),
-                ("Processing all CMIP scenarios",                     lambda: process_all_cmip_scenarios(default_result=r['cmip_results']),                                              'scenario_data_all'),
-                ("Performing incrementing window analysis",           lambda: perform_incrementing_window_analysis(r['obs_results'], r['cmip_results']),                                 'incrementing_window_results'),
-                ("Performing piControl incrementing window analysis", lambda: perform_piControl_incrementing_window(),                                                                   'picontrol_incrementing_results'),
-                ("Performing sliding window analysis CMIP",           lambda: perform_sliding_window_analysis(),                                                                         'sliding_results'),
-                ("Performing sliding window analysis piControl",      lambda: perform_piControl_sliding_window(),                                                                        'picontrol_results'),
-                ("Processing scenario data",                          lambda: process_cmip_scenario_data(),                                                                              'scenario_results'),
-                ("EOF analysis",                                      lambda: perform_eof_analysis(r['cmip_results'], r['sliding_results'], n_modes=N_MODES_OBSERVED),                   'eof_results'),
-                ("Correlating with climate indices",                  lambda: correlate_with_indices(r['eof_results']),                                                                  'correlation_results'),
-                ("Standard and rotated EOF comparison",               lambda: perform_dual_eof_comparison(r['cmip_results'], r['sliding_results'], n_modes=N_MODES_OBSERVED),            'dual_eof_results'),
-                ("Frequency analysis",                                lambda: perform_spectral_analysis(r['cmip_results'], r['obs_results'], n_modes=EOF_N_MODES),                       'spectral_results'),
-                ("Wind analysis",                                     lambda: load_wind_stress_data(),                                                                                   'wind_results')]
+    pipeline = [("Calculating the observed ODSL",                     lambda: calculate_observed_odsl(),                                                                      'obs_results'),
+                ("Smoothing comparison",                              lambda: calculate_smoothing_sensitivity(),                                                              'smoothing_results'),
+                ("Finding valid CMIP models",                         lambda: valid_models_table(),                                                                           'models_df'),
+                ("Processing CMIP models",                            lambda: process_cmip_models(),                                                                          'cmip_results'),
+                ("Processing all CMIP scenarios",                     lambda: process_all_cmip_scenarios(default_result=r['cmip_results']),                                   'scenario_data_all'),
+                ("Performing incrementing window analysis",           lambda: perform_incrementing_window_analysis(r['obs_results'], r['cmip_results']),                      'incrementing_window_results'),
+                ("Performing piControl incrementing window analysis", lambda: perform_piControl_incrementing_window(),                                                        'picontrol_incrementing_results'),
+                ("Performing sliding window analysis CMIP",           lambda: perform_sliding_window_analysis(),                                                              'sliding_results'),
+                ("Performing sliding window analysis piControl",      lambda: perform_piControl_sliding_window(),                                                             'picontrol_results'),
+                ("Processing scenario data",                          lambda: process_cmip_scenario_data(),                                                                   'scenario_results'),
+                ("EOF analysis",                                      lambda: perform_eof_analysis(r['cmip_results'], r['sliding_results'], n_modes=N_MODES_OBSERVED),        'eof_results'),
+                ("Correlating with climate indices",                  lambda: correlate_with_indices(r['eof_results']),                                                       'correlation_results'),
+                ("Standard and rotated EOF comparison",               lambda: perform_dual_eof_comparison(r['cmip_results'], r['sliding_results'], n_modes=N_MODES_OBSERVED), 'dual_eof_results'),
+                ("Standard and rotated EOF comparison (historical)",  lambda: perform_dual_eof_comparison_historical(r['cmip_results'], n_modes=N_MODES_OBSERVED),            'dual_eof_results_historical'),
+                ("Frequency analysis",                                lambda: perform_spectral_analysis(r['cmip_results'], r['obs_results'], n_modes=EOF_N_MODES),            'spectral_results'),
+                ("Wind analysis",                                     lambda: load_wind_stress_data(),                                                                        'wind_results')]
 
     progress_columns = [SpinnerColumn(), TextColumn("[progress.description]{task.description}"), BarColumn(), TextColumn("[progress.percentage]{task.percentage:>3.0f}%"), TimeElapsedColumn()]
 
@@ -2173,7 +2153,7 @@ def main():
         progress.update(task_id, description=f"[bold blue]Step {step_n}/{total_steps}:[/bold blue] Generating all figures", advance=1)
         progress.console.print("\nAll calculations complete. Generating figures...")
         
-        create_all_figures(obs_results=r['obs_results'], smoothing_results=r['smoothing_results'], cmip_results=r['cmip_results'], cmip5_results=r['cmip5_results'], cmip6_results=r['cmip6_results'], cmip5_all=r['cmip5_all'], cmip6_all=r['cmip6_all'], incrementing_window_results=r['incrementing_window_results'], sliding_results=r['sliding_results'], picontrol_incrementing_results=r['picontrol_incrementing_results'], picontrol_results=r['picontrol_results'], scenario_results=r['scenario_results'], eof_results=r['eof_results'], dual_eof_results=r['dual_eof_results'], correlation_results=r['correlation_results'], fig_dir=fig_dir, spectral_results=r['spectral_results'], wind_results=r['wind_results'])
+        create_all_figures(obs_results=r['obs_results'], smoothing_results=r['smoothing_results'], cmip_results=r['cmip_results'], cmip5_results=r['cmip5_results'], cmip6_results=r['cmip6_results'], cmip5_all=r['cmip5_all'], cmip6_all=r['cmip6_all'], incrementing_window_results=r['incrementing_window_results'], sliding_results=r['sliding_results'], picontrol_incrementing_results=r['picontrol_incrementing_results'], picontrol_results=r['picontrol_results'], scenario_results=r['scenario_results'], eof_results=r['eof_results'], dual_eof_results=r['dual_eof_results'], dual_eof_results_historical=r['dual_eof_results_historical'], correlation_results=r['correlation_results'], fig_dir=fig_dir, spectral_results=r['spectral_results'], wind_results=r['wind_results'])
     
         progress.console.print("[bold green]✔ All figures generated![/bold green]")
         progress.update(task_id, description="[bold green]Analysis complete!")

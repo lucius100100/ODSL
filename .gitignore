@@ -15,3 +15,4 @@ dependencies.py
 dependencies_overview.txt
 Latex/
 .vscode/
+/node_modules

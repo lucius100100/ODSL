@@ -124,7 +124,7 @@ ODSL/
 
 ## Cache size
 
-Total data size: ~50 GB
+Total project size: ~120 GB
 Total cache size: ~20 GB
 First run (all options): 4-8 hours
 Cached runs: 1-5 minutes

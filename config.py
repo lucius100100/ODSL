@@ -5,10 +5,11 @@ Configuration file for ODSL analysis and plotting.
 """
 
 #parameters
-CMIP_VERSION                  = 'CMIP5'           #CMIP version to be used: 'CMIP5' or 'CMIP6'
-PROCESS_ALL_SCENARIOS         = True             #process all CMIP5/CMIP6 scenarios for comparison figure (slow)
+CMIP_VERSION                  = 'CMIP6'           #CMIP version to be used: 'CMIP5' or 'CMIP6'
+PROCESS_ALL_SCENARIOS         = True              #process all CMIP5/CMIP6 scenarios for comparison figure (slow)
 START_YEAR                    = 1993              #observed period
 END_YEAR                      = 2024
+SLIDING_START_YEAR            = 1850              #start year for sliding window analysis (between 1850 and 1993)
 #EXTENT                       = [-65, 40, 50, 80] #North Atlantic (Richter et al., 2017)
 #EXTENT                       = [-100, 20, 8, 80] #North Atlantic
 EXTENT                        = [-100, 40, 8, 80] #North Atlantic including Caribbean
@@ -20,7 +21,7 @@ PLOT_VARIABLE                 = 'trend'           #what to plot: 'ODSL' (cm), 't
 PLOT_ALL_VARIABLES            = True              #plot all variables
 CMIP5_FUTURE_SCENARIO         = 'rcp45'           #CMIP future scenario to be used after historical: 'rcp26', 'rcp45', 'rcp85'
 CMIP6_FUTURE_SCENARIO         = 'ssp245'          #CMIP future scenario to be used after historical: 'ssp126', 'ssp245', 'ssp585'
-PROCESS_PICONTROL             = False             #include piControl or not 
+PROCESS_PICONTROL             = True              #include piControl or not 
 EOF_N_MODES                   = 5                 #number of EOF modes to plot
 APPLY_SPATIAL_SMOOTHING       = True              #Gaussian smoothing altimetry dataset
 SPATIAL_SMOOTHING_SIGMA       = 9.0               #Gaussian smoothing sigma

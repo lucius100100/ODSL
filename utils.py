@@ -4,7 +4,7 @@
 Utility functions.
 """
 
-from config import ALPHA, VARIABILITY_DETREND_DEGREE
+from config import ALPHA, VARIABILITY_DETREND_DEGREE, N_MODES_OBSERVED, USE_ROTATED_EOF
 
 import xarray as xr
 import pandas as pd
@@ -25,6 +25,8 @@ import warnings
 import dask.base
 from matplotlib.ticker import MaxNLocator
 from scipy import signal
+from xeofs.single import EOF, EOFRotator
+from typing import cast
 
 def setup_esmf_environment():
     """Check for and set the ESMFMKFILE environment variable if it's not present. This is a known issue for esmpy versions >= 8.4.0 in some environments (like VS Code terminals) where the conda activation doesn't set this required variable. This function dynamically finds the 'esmf.mk' file and sets the variable before xesmf is imported. See: https://github.com/conda-forge/esmf-feedstock/issues/91"""
@@ -508,6 +510,96 @@ def remove_global_mean(data_array):
     
     return data_array - global_mean
 
+def calculate_single_eof(data_array, n_modes=N_MODES_OBSERVED):
+    """Helper function to perform EOF analysis on a single DataArray."""
+
+    #weird n_modes discrepancy
+    n_samples = data_array.sizes['time']
+    if n_modes is None:
+        target_modes = n_samples
+    else:
+        target_modes = n_modes
+
+    actual_modes = min(n_samples, target_modes)
+
+    #check
+    if n_samples < 3:
+        print(f"Skipping EOF; not enough time steps ({n_samples})")
+        return None
+    
+    valid_mask = data_array.notnull().all(dim='time')
+    data_array = data_array.where(valid_mask)
+        
+    model = EOF(n_modes=actual_modes, use_coslat=True)
+    model.fit(data_array, dim='time')
+
+    if USE_ROTATED_EOF:
+
+        #varimax rotation
+        rotator = EOFRotator(n_modes=actual_modes)
+        rotator.fit(model)
+
+        eofs               = cast(xr.DataArray, rotator.components())
+        pcs                = cast(xr.DataArray, rotator.scores())
+        variance_fractions = cast(xr.DataArray, rotator.explained_variance_ratio())
+        method             = 'Rotated EOF (Varimax) via xeofs'
+
+    else:    
+
+        #normal EOF
+        eofs               = cast(xr.DataArray, model.components())
+        pcs                = cast(xr.DataArray, model.scores())
+        variance_fractions = cast(xr.DataArray, model.explained_variance_ratio())
+        method             = 'Unrotated EOF via xeofs'
+    
+    new_mode_coords      = np.arange(actual_modes)
+    eofs                 = eofs.assign_coords(mode=new_mode_coords)
+    pcs                  = pcs.assign_coords(mode=new_mode_coords)
+    variance_fractions   = variance_fractions.assign_coords(mode=new_mode_coords)
+    eofs.attrs['method'] = method
+
+    #remove standard attributes that are not cachable (dictionaries)
+    unserializable_attrs = ['solver_kwargs', 'solver', 'sample_name', 'feature_name']
+    for da in [eofs, pcs, variance_fractions]:
+        for attr in unserializable_attrs:
+            da.attrs.pop(attr, None)
+
+    return xr.Dataset({'eofs': eofs, 'pcs': pcs, 'variance_fractions': variance_fractions})
+
+def monte_carlo_significance_test(data_array, n_realizations=500, n_modes=None, alpha=None):
+    """Monte Carlo significance test against red noise."""
+
+    print(f"Running Monte Carlo test ({n_realizations} realizations)...")
+    
+    #calculate AR(1) alpha
+    if alpha is None:
+        alpha = estimate_temporal_autocorrelation(data_array)
+        print(f"Estimated lag-1 autocorrelation: {alpha:.3f}")
+    
+    #number of modes
+    if n_modes is None:
+        n_modes = min(data_array.sizes['time'], 10)
+    
+    #eigenvalues from all realizations
+    synthetic_lambdas = np.zeros((n_realizations, n_modes))
+    
+    for i in range(n_realizations):
+        synthetic_data = generate_red_noise_field(data_array, alpha, seed=i)
+        synthetic_eof  = calculate_single_eof(synthetic_data, n_modes=n_modes)
+        
+        if synthetic_eof is not None:
+            synthetic_lambdas[i, :] = synthetic_eof['variance_fractions'].values
+    
+    percentile_95 = np.percentile(synthetic_lambdas, 95, axis=0)
+    percentile_99 = np.percentile(synthetic_lambdas, 99, axis=0)
+    
+    result = xr.Dataset({'mc_threshold_95': (['mode'], percentile_95), 'mc_threshold_99': (['mode'], percentile_99), 'synthetic_lambdas': (['realization', 'mode'], synthetic_lambdas)})
+    
+    result.attrs['n_realizations'] = n_realizations
+    result.attrs['alpha']          = alpha
+    
+    return result
+
 def estimate_temporal_autocorrelation(timeseries):
     """Estimate lag-1 autocorrelation for red noise generation."""
 
@@ -540,6 +632,7 @@ def generate_red_noise_field(data_template, alpha, seed=None):
     noise = np.random.randn(nt, *spatial_shape)
     
     #AR(1): X(t) = alpha * X(t-1) + sqrt(1-alpha^2) * epsilon(t)
+    #Wilks, 2011 eq. 8.16 & 8.21
     red_noise = np.zeros_like(noise)
     red_noise[0] = noise[0]
     
@@ -574,24 +667,24 @@ def compute_field_significance(data, plot_var, region_mask=None, alpha=ALPHA):
     if plot_var == 'trend':
         #linear trend and significance
         trend_coeffs = data.polyfit(dim=time_dim, deg=1)
-        slope = trend_coeffs.polyfit_coefficients.sel(degree=1)
-        field = slope * 10  #mm/yr
+        slope        = trend_coeffs.polyfit_coefficients.sel(degree=1)
+        field        = slope * 10  #mm/yr
 
         #residuals and standard error of slope 
-        fitted = xr.polyval(data[time_dim], trend_coeffs.polyfit_coefficients)
+        fitted    = xr.polyval(data[time_dim], trend_coeffs.polyfit_coefficients)
         residuals = data - fitted
-        sse = (residuals**2).sum(dim=time_dim)
-        ssx = np.sum((time_vals.astype(float) - np.mean(time_vals.astype(float)))**2)
-        se_slope = np.sqrt(sse / (n_t - 2)) / np.sqrt(ssx)
+        sse       = (residuals**2).sum(dim=time_dim)
+        ssx       = np.sum((time_vals.astype(float) - np.mean(time_vals.astype(float)))**2)
+        se_slope  = np.sqrt(sse / (n_t - 2)) / np.sqrt(ssx)
 
         #t-test
-        df = n_t - 2
-        t_stat = slope / se_slope
+        df       = n_t - 2
+        t_stat   = slope / se_slope
         p_values = 2 * stats.t.sf(np.abs(t_stat.values), df=df)
-        p_val = xr.DataArray(p_values, coords=slope.coords, dims=slope.dims)
+        p_val    = xr.DataArray(p_values, coords=slope.coords, dims=slope.dims)
 
         #CI
-        t_crit = stats.t.ppf(1 - alpha / 2, df=df)
+        t_crit   = stats.t.ppf(1 - alpha / 2, df=df)
         ci_lower = slope - t_crit * se_slope
         ci_upper = slope + t_crit * se_slope
 
@@ -606,10 +699,10 @@ def compute_field_significance(data, plot_var, region_mask=None, alpha=ALPHA):
 
         se = field / np.sqrt(2 * (n_t - 1))
 
-        df = n_t - 1
-        chi2_lo = stats.chi2.ppf(alpha / 2, df)
-        chi2_hi = stats.chi2.ppf(1 - alpha / 2, df)
-        var_sq = field ** 2
+        df       = n_t - 1
+        chi2_lo  = stats.chi2.ppf(alpha / 2, df)
+        chi2_hi  = stats.chi2.ppf(1 - alpha / 2, df)
+        var_sq   = field ** 2
         ci_lower = np.sqrt((df * var_sq) / chi2_hi)
         ci_upper = np.sqrt((df * var_sq) / chi2_lo)
 
@@ -621,12 +714,12 @@ def compute_field_significance(data, plot_var, region_mask=None, alpha=ALPHA):
         temporal_std = data.std(dim=time_dim)
         se = temporal_std / np.sqrt(n_t)
 
-        df = n_t - 1
-        t_stat = field * np.sqrt(n_t) / temporal_std
+        df       = n_t - 1
+        t_stat   = field * np.sqrt(n_t) / temporal_std
         p_values = 2 * stats.t.sf(np.abs(t_stat.values), df=df)
-        p_val = xr.DataArray(p_values, coords=field.coords, dims=field.dims)
+        p_val    = xr.DataArray(p_values, coords=field.coords, dims=field.dims)
 
-        t_crit = stats.t.ppf(1 - alpha / 2, df=df)
+        t_crit   = stats.t.ppf(1 - alpha / 2, df=df)
         ci_lower = field - t_crit * se
         ci_upper = field + t_crit * se
 
@@ -651,3 +744,4 @@ def calculate_power_spectrum(pc_timeseries):
     freqs, power = signal.periodogram(data, fs=1.0, window='boxcar', detrend='linear', scaling='density')
 
     return xr.DataArray(power, coords={'frequency': freqs}, dims='frequency', name='power_spectrum')
+

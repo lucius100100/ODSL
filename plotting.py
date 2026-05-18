@@ -6,14 +6,13 @@ Plotting functions for ODSL analysis.
 
 from utils import calculate_weighted_stats, create_region_mask, add_map_features, compute_field_significance, make_aligned_levels
 from data_loader import load_climate_indices_dict
-from config import (CMIP_VERSION, START_YEAR, END_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG, EOF_N_MODES, PLOT_ALL_VARIABLES, USE_ROTATED_EOF, N_REALIZATIONS_MONTE_CARLO, N_MODES_OBSERVED, KNMI_DUTCH_COAST, NA_REGIONS)
+from config import (CMIP_VERSION, START_YEAR, END_YEAR, SLIDING_START_YEAR, EXTENT, PROJECTION_PARAMS, PLOT_VARIABLE, PLOT_CONFIG, EOF_N_MODES, PLOT_ALL_VARIABLES, USE_ROTATED_EOF, N_REALIZATIONS_MONTE_CARLO, N_MODES_OBSERVED, KNMI_DUTCH_COAST, NA_REGIONS)
 
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from cartopy.mpl.geoaxes import GeoAxes
 import os
 import pandas as pd
 import warnings
@@ -22,8 +21,7 @@ import matplotlib.ticker as mticker
 import matplotlib.lines as mlines
 from matplotlib.ticker import MaxNLocator
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch, Circle, FancyArrow
-from matplotlib.text import Text
+from matplotlib.patches import Patch, Circle
 import matplotlib.gridspec as gridspec
 import seaborn as sns
 import matplotlib.colors as mcolors
@@ -32,13 +30,13 @@ from scipy import stats
 from matplotlib.colors import LogNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import math
-from scipy import signal
 import regionmask
 from PIL import Image
+from typing import Any
 
 warnings.filterwarnings('ignore', message='Degrees of freedom <= 0 for slice', category=RuntimeWarning)
 
-def create_all_figures(obs_results, smoothing_results, cmip_results, cmip5_results, cmip6_results, cmip5_all, cmip6_all, incrementing_window_results, picontrol_incrementing_results, sliding_results, picontrol_results, scenario_results, eof_results, dual_eof_results, correlation_results, fig_dir, spectral_results, wind_results):
+def create_all_figures(obs_results, smoothing_results, cmip_results, cmip5_results, cmip6_results, cmip5_all, cmip6_all, incrementing_window_results, picontrol_incrementing_results, sliding_results, picontrol_results, scenario_results, eof_results, dual_eof_results, dual_eof_results_historical, correlation_results, fig_dir, spectral_results, wind_results):
     """Generate all figures for the analysis."""
 
     #general figure directory
@@ -68,18 +66,18 @@ def create_all_figures(obs_results, smoothing_results, cmip_results, cmip5_resul
         plot_all_models_overview_best_windows(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var, metric='pcc')
         plot_all_models_overview_best_windows(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var, metric='rmse')
         plot_regional_overview(obs_results, cmip_results, variable_fig_dir, plot_var=plot_var)
-        # plot_cmip_multimodel_mean(cmip_results, variable_fig_dir, plot_var=plot_var)
-        # plot_observed_regridded(sliding_results, variable_fig_dir, plot_var=plot_var)
+        plot_cmip_multimodel_mean(cmip_results, variable_fig_dir, plot_var=plot_var)
+        plot_observed_regridded(sliding_results, variable_fig_dir, plot_var=plot_var)
         plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var)
         plot_observed_vs_best_windows(obs_results, cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var)
-        # plot_scatter_comparison(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var)
-        # plot_scatter_comparison_individual_models(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var)
+        plot_scatter_comparison(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var)
+        plot_scatter_comparison_individual_models(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var)
         plot_all_models_overview(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var)
-        # plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var, picontrol_results=picontrol_results)
-        # plot_sliding_window_timeseries(sliding_results, variable_fig_dir, plot_var=plot_var)
-        # plot_best_and_worst_matching_periods(sliding_results, variable_fig_dir, plot_var=plot_var)
+        plot_model_comparison_summary(cmip_results, sliding_results, variable_fig_dir, plot_var=plot_var, picontrol_results=picontrol_results)
+        plot_sliding_window_timeseries(sliding_results, variable_fig_dir, plot_var=plot_var)
+        plot_best_and_worst_matching_periods(sliding_results, variable_fig_dir, plot_var=plot_var)
         plot_incrementing_window_skill(incrementing_window_results, variable_fig_dir, plot_var=plot_var, picontrol_incrementing_results=picontrol_incrementing_results)
-        # plot_odsl_trend_bar_comparison(obs_results, cmip_results, variable_fig_dir, plot_var=plot_var)
+        plot_odsl_trend_bar_comparison(obs_results, cmip_results, variable_fig_dir, plot_var=plot_var)
         if cmip5_all is not None and cmip6_all is not None:
             plot_cmip5_vs_cmip6_scenarios(cmip5_all, cmip6_all, variable_fig_dir, plot_var=plot_var)
         
@@ -89,10 +87,10 @@ def create_all_figures(obs_results, smoothing_results, cmip_results, cmip5_resul
             plot_observed_variability(obs_results, variable_fig_dir)
 
     #EOF figures
-    plot_dual_eof_comparison(dual_eof_results, eof_fig_dir, num_modes_to_plot=10, source='observed')
+    plot_dual_eof_comparison(dual_eof_results, eof_fig_dir, num_modes_to_plot=5, source='observed')
     plot_spatial_eofs(eof_results, eof_fig_dir, num_modes_to_plot=EOF_N_MODES)
-    plot_pc_timeseries(dual_eof_results, eof_fig_dir, num_modes_to_plot=5, normalize=False)
-    plot_pc_timeseries(dual_eof_results, eof_fig_dir, num_modes_to_plot=5, normalize=True)
+    plot_pc_timeseries(dual_eof_results, dual_eof_results_historical, eof_fig_dir, num_modes_to_plot=5, normalize=False)
+    plot_pc_timeseries(dual_eof_results, dual_eof_results_historical, eof_fig_dir, num_modes_to_plot=5, normalize=True)
     plot_eof_maps_comparison(eof_results, eof_fig_dir, num_modes=EOF_N_MODES)
     plot_eof_monte_carlo_significance(eof_results, eof_fig_dir)
     plot_obs_vs_mmm_significance(eof_results, eof_fig_dir)
@@ -107,7 +105,7 @@ def create_all_figures(obs_results, smoothing_results, cmip_results, cmip5_resul
     # plot_yearly_odsl_anomaly(obs_results, fig_dir)
     plot_scenario_timeseries(scenario_results, obs_results, fig_dir)
     plot_smoothing_sensitivity(smoothing_results, fig_dir)
-    # plot_3d_odsl_cover_art(obs_results, fig_dir, variable='odsl_mean')
+    plot_3d_odsl_cover_art(obs_results, fig_dir, variable='odsl_mean')
 
 def plot_observed_odsl_components(obs_results, fig_dir, wind_results=None):
     """Plot the components of observed ODSL."""
@@ -186,7 +184,7 @@ def plot_observed_odsl_components(obs_results, fig_dir, wind_results=None):
     cbar.set_ticks(ticks_main.tolist())
     cbar.set_label('Trend (mm/yr)', fontsize=14)
     
-    plt.suptitle(f'Observed ODSL components ({common_years.min()}-{common_years.max()})', fontsize=16, fontweight='bold', y=0.91)
+    plt.suptitle(f'Observed ODSL derivation ({common_years.min()}-{common_years.max()})', fontsize=16, fontweight='bold', y=0.91)
     
     plt.savefig(os.path.join(fig_dir, f'ODSL_components_{START_YEAR}_{END_YEAR}.png'), dpi=300, bbox_inches='tight')
     #plt.show()
@@ -224,7 +222,7 @@ def plot_regional_overview(obs_results, cmip_results, fig_dir, plot_var=None):
     #variables
     if plot_var == 'trend':
         obs_map         = obs_results['odsl']
-        obs_se_field    = obs_results['odsl_std_error']
+        obs_se_field    = obs_results['odsl_std_error'] / 10
         model_stack_key = 'model_trend'
         model_se_key    = 'model_trend_std_error'
         mmm_field       = cmip_results['model_mean_trend']
@@ -477,8 +475,8 @@ def plot_regional_overview(obs_results, cmip_results, fig_dir, plot_var=None):
     #legend location
     empty_start = n_regions
     if empty_start < bar_rows * bar_cols:
-        row = empty_start // bar_cols
-        col = empty_start % bar_cols
+        row    = empty_start // bar_cols
+        col    = empty_start % bar_cols
         ax_leg = fig.add_subplot(inner[row, col])
         ax_leg.axis('off')
         ax_leg.legend(handles=bar_legend_handles, loc='center', fontsize=9, frameon=False)
@@ -502,41 +500,41 @@ def plot_odsl_trend_bar_comparison(obs_results, cmip_results, fig_dir, plot_var=
 
     #variables
     if plot_var == 'trend':
-        obs_field = obs_results['odsl']
-        obs_se_field = obs_results['odsl_std_error']
+        obs_field      = obs_results['odsl']
+        obs_se_field   = obs_results['odsl_std_error'] / 10
         model_means_da = cmip_results['trend_mean']
-        model_se_key = 'model_trend_std_error'
-        mmm_field = cmip_results['model_mean_trend']
-        mmm_se_field = cmip_results['model_mean_trend_std_error']
+        model_se_key   = 'model_trend_std_error'
+        mmm_field      = cmip_results['model_mean_trend']
+        mmm_se_field   = cmip_results['model_mean_trend_std_error']
 
     elif plot_var == 'variability':
-        obs_field = obs_results['variability']
-        obs_se_field = obs_results['variability_std_error']
+        obs_field      = obs_results['variability']
+        obs_se_field   = obs_results['variability_std_error']
         model_means_da = None 
-        model_se_key = 'model_variability_std_error'
-        mmm_field = cmip_results['model_mean_variability']
-        mmm_se_field = cmip_results['model_mean_variability_std_error']
+        model_se_key   = 'model_variability_std_error'
+        mmm_field      = cmip_results['model_mean_variability']
+        mmm_se_field   = cmip_results['model_mean_variability_std_error']
 
     elif plot_var == 'ODSL':
-        obs_field = obs_results['odsl_mean']
-        obs_se_field = obs_results['odsl_mean_std_error']
+        obs_field      = obs_results['odsl_mean']
+        obs_se_field   = obs_results['odsl_mean_std_error']
         model_means_da = None
-        model_se_key = 'model_odsl_mean_std_error'
-        mmm_field = cmip_results['model_mean_odsl']
-        mmm_se_field = cmip_results['model_mean_odsl_std_error']
+        model_se_key   = 'model_odsl_mean_std_error'
+        mmm_field      = cmip_results['model_mean_odsl']
+        mmm_se_field   = cmip_results['model_mean_odsl_std_error']
 
     else:
         raise ValueError(f"Unknown plot_var: {plot_var}. Must be 'trend', 'variability', or 'ODSL'")
 
     #observed
     obs_region_mask = create_region_mask(obs_field, EXTENT)
-    obs_stats = calculate_weighted_stats(obs_field, obs_region_mask)
-    obs_mean = obs_stats['mean_x']
+    obs_stats       = calculate_weighted_stats(obs_field, obs_region_mask)
+    obs_mean        = obs_stats['mean_x']
 
     lat_obs = 'latitude' if 'latitude' in obs_se_field.dims else 'lat'
     lon_obs = 'longitude' if 'longitude' in obs_se_field.dims else 'lon'
-    w_obs = np.cos(np.deg2rad(obs_se_field[lat_obs]))
-    obs_se = float(obs_se_field.weighted(w_obs).mean(dim=[lat_obs, lon_obs], skipna=True).item())
+    w_obs   = np.cos(np.deg2rad(obs_se_field[lat_obs]))
+    obs_se  = float(obs_se_field.weighted(w_obs).mean(dim=[lat_obs, lon_obs], skipna=True).item())
 
     #individual means and SE
     model_names = cmip_results.model.values.tolist()
@@ -553,15 +551,15 @@ def plot_odsl_trend_bar_comparison(obs_results, cmip_results, fig_dir, plot_var=
         model_means = []
         for model_name in model_names:
             field = model_stack.sel(model=model_name) # type: ignore
-            mask = create_region_mask(field, EXTENT)
-            s = calculate_weighted_stats(field, mask)
+            mask  = create_region_mask(field, EXTENT)
+            s     = calculate_weighted_stats(field, mask)
             model_means.append(s['mean_x'])
 
     model_ses = []
     if model_se_key is not None:
         for model_name in model_names:
             se_field = cmip_results[model_se_key].sel(model=model_name)
-            w_m = np.cos(np.deg2rad(se_field.latitude))
+            w_m      = np.cos(np.deg2rad(se_field.latitude))
             model_ses.append(float(se_field.weighted(w_m).mean(dim=['latitude', 'longitude'], skipna=True).item()))
     else:
         #no error bar if no SE
@@ -569,14 +567,14 @@ def plot_odsl_trend_bar_comparison(obs_results, cmip_results, fig_dir, plot_var=
 
     #multi-model mean
     mmm_region_mask = create_region_mask(mmm_field, EXTENT)
-    mmm_stats = calculate_weighted_stats(mmm_field, mmm_region_mask)
-    mmm_mean = mmm_stats['mean_x']
+    mmm_stats       = calculate_weighted_stats(mmm_field, mmm_region_mask)
+    mmm_mean        = mmm_stats['mean_x']
 
     w_cmip = np.cos(np.deg2rad(mmm_se_field.latitude))
     mmm_se = float(mmm_se_field.weighted(w_cmip).mean(dim=['latitude', 'longitude'], skipna=True).item())
 
     #sort individual models by avg
-    sorted_idx = np.argsort(model_means)
+    sorted_idx         = np.argsort(model_means)
     model_names_sorted = [model_names[i] for i in sorted_idx]
     model_means_sorted = [model_means[i] for i in sorted_idx]
     model_ses_sorted   = [model_ses[i]   for i in sorted_idx]
@@ -585,8 +583,9 @@ def plot_odsl_trend_bar_comparison(obs_results, cmip_results, fig_dir, plot_var=
     x_labels = ['Observed', 'Multi-model\nmean'] + model_names_sorted
     y_values = [obs_mean, mmm_mean] + model_means_sorted
     y_errors = [obs_se, mmm_se] + model_ses_sorted
+    x_pos    = np.arange(len(x_labels))
+
     n_priority = 2
-    x_pos = np.arange(len(x_labels))
 
     #plotting
     fig, ax = plt.subplots(figsize=(max(8, len(x_labels) * 0.4), 5))
@@ -874,7 +873,7 @@ def plot_cmip5_vs_cmip6_scenarios(cmip5_all, cmip6_all, fig_dir, plot_var=None):
         ax_c5.contour(snr_c5.longitude, snr_c5.latitude, snr_c5, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
 
         row_letter = chr(ord('a') + row_idx * 3)
-        ax_c5.set_title(f'{row_letter}) CMIP5 {c5_label} ({rd["n5"]} models)\nMean: {stats_cmip["mean_x"]:.2f} | RMS: {stats_cmip["std_x"]:.2f} {cfg["units"]}', fontsize=10)
+        ax_c5.set_title(fr'$\bf{{{row_letter})\ CMIP5\ {c5_label}\ ({rd["n5"]}\ models)}}$'f'\nMean: {stats_cmip["mean_x"]:.2f} | RMS: {stats_cmip["std_x"]:.2f} {cfg["units"]}', fontsize=10)
 
         #CMIP6
         add_map_features(ax_c6, EXTENT, is_left=False, is_bottom=(row_idx == 2))
@@ -884,11 +883,11 @@ def plot_cmip5_vs_cmip6_scenarios(cmip5_all, cmip6_all, fig_dir, plot_var=None):
         ax_c6.contour(snr_c6.longitude, snr_c6.latitude, snr_c6, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
 
         row_letter_b = chr(ord('a') + row_idx * 3 + 1)
-        bold_line = fr"$\bf{{PCC = {stats_cmip['pcc']:.2f}\ |\ RMSE = {stats_cmip['rmse']:.2f}}}$"
+        bold_line = f"PCC = {stats_cmip['pcc']:.2f} | RMSE = {stats_cmip['rmse']:.2f}{cfg['units']}"
         if plot_var != 'variability':
             sign_val = stats_cmip["sign_agreement"] * 100
-            bold_line += ' | ' + fr"$\bf{{Sign\ agreement = {sign_val:.0f}\%}}$"
-        title_b = f'{bold_line}\n{row_letter_b}) CMIP6 {c6_label} ({rd["n6"]} models)\nMean: {stats_cmip["mean_y"]:.2f} | RMS: {stats_cmip["std_y"]:.2f} {cfg["units"]}'
+            bold_line += ' | ' + f"Sign agreement = {sign_val:.0f}%"
+        title_b = f'{bold_line}\n'fr'$\bf{{{row_letter_b})\ CMIP6\ {c6_label}\ ({rd["n6"]}\ models)}}$'f'\nMean: {stats_cmip["mean_y"]:.2f} | RMS: {stats_cmip["std_y"]:.2f} {cfg["units"]}'
         ax_c6.set_title(title_b, fontsize=10)
 
         #difference
@@ -897,7 +896,7 @@ def plot_cmip5_vs_cmip6_scenarios(cmip5_all, cmip6_all, fig_dir, plot_var=None):
         ax_diff.contour(snr_diff.longitude, snr_diff.latitude, snr_diff, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
 
         row_letter_c = chr(ord('a') + row_idx * 3 + 2)
-        ax_diff.set_title(f'{row_letter_c}) CMIP6 $-$ CMIP5 ({rd["label"]})\nMean: {stats_diff["mean_x"]:.2f} | RMS: {stats_diff["std_x"]:.2f} {cfg["units"]}', fontsize=10)
+        ax_diff.set_title(fr'$\bf{{{row_letter_c})\ CMIP6\ -\ CMIP5\ ({rd["label"]})}}$'f'\nMean: {stats_diff["mean_x"]:.2f} | RMS: {stats_diff["std_x"]:.2f} {cfg["units"]}', fontsize=10)
 
         #row label
         ax_diff.annotate(rd['label'], xy=(1.08, 0.5), xycoords='axes fraction', fontsize=20, fontweight='bold', rotation=-90, ha='center', va='center')
@@ -996,12 +995,12 @@ def plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, fig_dir
     #difference
     snr_diff = abs(difference) / model_std
         
-    region_mask = create_region_mask(model_data, EXTENT)
+    region_mask      = create_region_mask(model_data, EXTENT)
     stats_comparison = calculate_weighted_stats(model_data, region_mask, data_y=obs_data)
     stats_difference = calculate_weighted_stats(difference, region_mask)
-    pcc_w = stats_comparison['pcc']
-    rmse_w = stats_comparison['rmse']
-    sign_agr = stats_comparison['sign_agreement']
+    pcc_w            = stats_comparison['pcc']
+    rmse_w           = stats_comparison['rmse']
+    sign_agr         = stats_comparison['sign_agreement']
     
     proj = ccrs.AlbersEqualArea(central_longitude=PROJECTION_PARAMS['central_longitude'], central_latitude=PROJECTION_PARAMS['central_latitude'], standard_parallels=PROJECTION_PARAMS['standard_parallels'])
     fig, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3, figsize=(22, 5.5), subplot_kw={'projection': proj})
@@ -1013,7 +1012,7 @@ def plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, fig_dir
     if obs_p_value is not None:
         ax1.contourf(obs_p_value.longitude, obs_p_value.latitude, obs_p_value < 0.05, levels=[0.5, 1.5], transform=ccrs.PlateCarree(), colors='none', hatches=['...'])
         
-    ax1.set_title(f'a) Observed ODSL ({cfg["name"]})\nMean: {stats_comparison["mean_y"]:.2f} {cfg["units"]} | RMS: {stats_comparison["std_y"]:.2f} {cfg["units"]}', fontsize=11)
+    ax1.set_title(fr'$\bf{{a)\ Observed\ ODSL\ ({cfg["name"]})}}$'f'\nMean: {stats_comparison["mean_y"]:.2f} {cfg["units"]} | RMS: {stats_comparison["std_y"]:.2f} {cfg["units"]}', fontsize=11)
 
     #subplot 2: modelled ODSL
     add_map_features(ax2, EXTENT, is_left=False, is_bottom=True)
@@ -1023,20 +1022,20 @@ def plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, fig_dir
         ax2.contourf(model_p_value.longitude, model_p_value.latitude, model_p_value < 0.05, levels=[0.5, 1.5], transform=ccrs.PlateCarree(), colors='none', hatches=['...'])   
     
     ax2.contour(snr_model.longitude, snr_model.latitude, snr_model, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
-    ax2.set_title(f'b) CMIP mean ODSL ({cfg["name"]})\nMean: {stats_comparison["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_comparison["std_x"]:.2f} {cfg["units"]}', fontsize=11)
+    ax2.set_title(fr'$\bf{{b)\ CMIP\ mean\ ODSL\ ({cfg["name"]})}}$'f'\nMean: {stats_comparison["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_comparison["std_x"]:.2f} {cfg["units"]}', fontsize=11)
     
     #subplot 3: difference (model - observed)
     add_map_features(ax3, EXTENT, is_left=False, is_bottom=True)
     mesh3 = difference.plot.contourf(ax=ax3, transform=ccrs.PlateCarree(), cmap=cmap_diff, vmin=vmin_diff, vmax=vmax_diff, add_colorbar=False, levels=levels_diff, extend='both')
     ax3.contour(snr_diff.longitude, snr_diff.latitude, snr_diff, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
-    ax3.set_title(f'c) Difference (model - obs)\nMean: {stats_difference["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_difference["std_x"]:.2f} {cfg["units"]}', fontsize=11)
+    ax3.set_title(fr'$\bf{{c)\ Difference\ (model\ -\ obs)}}$'f'\nMean: {stats_difference["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_difference["std_x"]:.2f} {cfg["units"]}', fontsize=11)
     
     #overall figure title
-    title_str = f'Observed vs. modeled ODSL ({START_YEAR}-{END_YEAR})\nPCC = {pcc_w:.2f} | RMSE = {rmse_w:.2f} {cfg["units"]}'
+    title_str = fr'$\bf{{Observed\ vs.\ modeled\ ODSL\ ({START_YEAR}-{END_YEAR})}}$'f'\nPCC = {pcc_w:.2f} | RMSE = {rmse_w:.2f} {cfg["units"]}'
     #sign agreement if not variability (variability \geq 0)
     if plot_var != 'variability':
         title_str += f' | Sign agreement = {sign_agr:.0%}'
-    fig.suptitle(title_str, fontsize=16, y=1.02, fontweight='bold')
+    fig.suptitle(title_str, fontsize=16, y=1.02)
 
     fig.subplots_adjust(left=0.05, right=0.95, bottom=0.15, top=0.85, wspace=0.15)
 
@@ -1050,13 +1049,13 @@ def plot_observed_vs_modeled(obs_results, cmip_results, sliding_results, fig_dir
 
     #shared colorbar observed and modeled
     cbar_ax1 = fig.add_axes((pos1.x0, cbar_bottom, pos2.x1 - pos1.x0, cbar_height))
-    cbar1 = fig.colorbar(mesh1, cax=cbar_ax1, orientation='horizontal', extend=extend_main)
+    cbar1    = fig.colorbar(mesh1, cax=cbar_ax1, orientation='horizontal', extend=extend_main)
     cbar1.set_ticks(ticks_main.tolist())
     cbar1.set_label(f'{cfg["name"]} ({cfg["units"]})', fontsize=12)
     
     #colorbar difference
     cbar_ax2 = fig.add_axes((pos3.x0, cbar_bottom, pos3.width, cbar_height))
-    cbar2 = fig.colorbar(mesh3, cax=cbar_ax2, orientation='horizontal', extend='both')
+    cbar2    = fig.colorbar(mesh3, cax=cbar_ax2, orientation='horizontal', extend='both')
     cbar2.set_ticks(ticks_diff.tolist())
     cbar2.set_label(f'Difference ({cfg["units"]})', fontsize=12)
     
@@ -1196,13 +1195,13 @@ def plot_best_and_worst_matching_periods(sliding_results, fig_dir, plot_var=None
 
     model_names = sliding_results.model.values
     
-    best_pcc_windows, best_pcc_values = [], []
-    worst_pcc_windows, worst_pcc_values = [], []
-    best_rmse_windows, best_rmse_values = [], []
+    best_pcc_windows, best_pcc_values     = [], []
+    worst_pcc_windows, worst_pcc_values   = [], []
+    best_rmse_windows, best_rmse_values   = [], []
     worst_rmse_windows, worst_rmse_values = [], []
 
     for model_name in model_names:
-        pcc_model = pcc_data.sel(model=model_name)
+        pcc_model  = pcc_data.sel(model=model_name)
         rmse_model = rmse_data.sel(model=model_name)
         
         try:
@@ -1231,28 +1230,51 @@ def plot_best_and_worst_matching_periods(sliding_results, fig_dir, plot_var=None
         except ValueError: 
             best_rmse_windows.append((np.nan, np.nan)); best_rmse_values.append(np.nan)
 
-    pcc_mean_ts = pcc_data.mean(dim='model')
+    pcc_mean_ts  = pcc_data.mean(dim='model')
     rmse_mean_ts = rmse_data.mean(dim='model')
 
     #best PCC ensemble
-    ens_best_pcc_year = pcc_mean_ts.idxmax('window_start_year').item()
+    ens_best_pcc_year   = pcc_mean_ts.idxmax('window_start_year').item()
     ens_best_pcc_window = (ens_best_pcc_year, ens_best_pcc_year + window_size - 1)
-    ens_max_pcc_value = pcc_mean_ts.max('window_start_year').item()
+    ens_max_pcc_value   = pcc_mean_ts.max('window_start_year').item()
 
     #worst PCC ensemble
-    ens_worst_pcc_year = pcc_mean_ts.idxmin('window_start_year').item()
+    ens_worst_pcc_year   = pcc_mean_ts.idxmin('window_start_year').item()
     ens_worst_pcc_window = (ens_worst_pcc_year, ens_worst_pcc_year + window_size - 1)
-    ens_min_pcc_value = pcc_mean_ts.min('window_start_year').item()
+    ens_min_pcc_value    = pcc_mean_ts.min('window_start_year').item()
     
     #best RMSE ensemble
-    ens_best_rmse_year = rmse_mean_ts.idxmin('window_start_year').item()
+    ens_best_rmse_year   = rmse_mean_ts.idxmin('window_start_year').item()
     ens_best_rmse_window = (ens_best_rmse_year, ens_best_rmse_year + window_size - 1)
-    ens_min_rmse_value = rmse_mean_ts.min('window_start_year').item()
+    ens_min_rmse_value   = rmse_mean_ts.min('window_start_year').item()
 
     #worst RMSE ensemble
-    ens_worst_rmse_year = rmse_mean_ts.idxmax('window_start_year').item()
+    ens_worst_rmse_year   = rmse_mean_ts.idxmax('window_start_year').item()
     ens_worst_rmse_window = (ens_worst_rmse_year, ens_worst_rmse_year + window_size - 1)
-    ens_max_rmse_value = rmse_mean_ts.max('window_start_year').item()
+    ens_max_rmse_value    = rmse_mean_ts.max('window_start_year').item()
+
+    #within obs range ensemble
+    def get_models_within_obs_range(fig_dir):
+        csv_path = os.path.join(fig_dir, f'regional_model_selection_{cfg["name"]}_{START_YEAR}_{END_YEAR}.csv')
+        df       = pd.read_csv(csv_path)
+        mask     = (df['North Atlantic_within_obs'] == True) & (~df['source'].isin(['Observed', 'Multi-Model Mean']))
+        return df.loc[mask, 'source'].tolist()
+
+    selected_models = get_models_within_obs_range(fig_dir)
+    valid_models    = [m for m in selected_models if m in pcc_data.model.values]
+
+    within_entry = None
+    if len(valid_models) > 0:
+        within_label   = f'Within obs range\nensemble ({len(valid_models)})'
+        pcc_within_ts  = pcc_data.sel(model=valid_models).mean(dim='model')
+        rmse_within_ts = rmse_data.sel(model=valid_models).mean(dim='model')
+
+        w_best_pcc_year   = pcc_within_ts.idxmax('window_start_year').item()
+        w_worst_pcc_year  = pcc_within_ts.idxmin('window_start_year').item()
+        w_best_rmse_year  = rmse_within_ts.idxmin('window_start_year').item()
+        w_worst_rmse_year = rmse_within_ts.idxmax('window_start_year').item()
+
+        within_entry = (within_label, (w_best_pcc_year, w_best_pcc_year + window_size - 1), (w_best_rmse_year, w_best_rmse_year + window_size - 1), pcc_within_ts.max('window_start_year').item(), rmse_within_ts.min('window_start_year').item(), (w_worst_pcc_year, w_worst_pcc_year + window_size - 1), (w_worst_rmse_year, w_worst_rmse_year + window_size - 1), pcc_within_ts.min('window_start_year').item(), rmse_within_ts.max('window_start_year').item())
 
     #plotting
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -1272,6 +1294,8 @@ def plot_best_and_worst_matching_periods(sliding_results, fig_dir, plot_var=None
     
     ensemble_entry = ('Ensemble mean', ens_best_pcc_window, ens_best_rmse_window, ens_max_pcc_value, ens_min_rmse_value, ens_worst_pcc_window, ens_worst_rmse_window, ens_min_pcc_value, ens_max_rmse_value)
     sorted_combined_data.append(ensemble_entry)
+    if within_entry is not None:
+        sorted_combined_data.append(within_entry)
 
     if not sorted_combined_data:
         plt.show(); return
@@ -1279,13 +1303,13 @@ def plot_best_and_worst_matching_periods(sliding_results, fig_dir, plot_var=None
     sorted_model_list, sorted_best_pcc_windows, sorted_best_rmse_windows, sorted_best_pcc_values, sorted_best_rmse_values, sorted_worst_pcc_windows, sorted_worst_rmse_windows, sorted_worst_pcc_values, sorted_worst_rmse_values = zip(*sorted_combined_data)
 
     y_positions = np.arange(len(sorted_model_list))
-    bar_height = 0.4
+    bar_height  = 0.4
 
     for i in range(len(sorted_model_list)):
         
         #PCC bars
-        pcc_y_pos = y_positions[i] + bar_height / 2
-        best_pcc_win = sorted_best_pcc_windows[i]
+        pcc_y_pos     = y_positions[i] + bar_height / 2
+        best_pcc_win  = sorted_best_pcc_windows[i]
         worst_pcc_win = sorted_worst_pcc_windows[i]
         
         #best PCC
@@ -1298,7 +1322,7 @@ def plot_best_and_worst_matching_periods(sliding_results, fig_dir, plot_var=None
         if not np.isnan(worst_pcc_win[0]):
             value = sorted_worst_pcc_values[i]
             ax.barh(pcc_y_pos, worst_pcc_win[1] - worst_pcc_win[0], left=worst_pcc_win[0], height=bar_height, color='red', alpha=0.2, label='Worst PCC' if i == 0 else "", edgecolor='red', linestyle='--', linewidth=1)
-            ax.text((worst_pcc_win[0] + worst_pcc_win[1]) / 2, pcc_y_pos, f'{value:.2f}', ha='center', va='center', color='black', fontsize=7)
+            ax.text((worst_pcc_win[0] + worst_pcc_win[1]) / 2, pcc_y_pos, f'{value:.2f}', ha='center', va='center', color='white', fontsize=7)
 
         #line between best and worst PCC window
         if not np.isnan(best_pcc_win[0]) and not np.isnan(worst_pcc_win[0]):
@@ -1322,7 +1346,7 @@ def plot_best_and_worst_matching_periods(sliding_results, fig_dir, plot_var=None
         if not np.isnan(worst_rmse_win[0]):
             value = sorted_worst_rmse_values[i]
             ax.barh(rmse_y_pos, worst_rmse_win[1] - worst_rmse_win[0], left=worst_rmse_win[0], height=bar_height, color='black', alpha=0.2, label='Worst RMSE' if i == 0 else "", edgecolor='black', linestyle='--', linewidth=1)
-            ax.text((worst_rmse_win[0] + worst_rmse_win[1]) / 2, rmse_y_pos, f'{value:.2f}', ha='center', va='center', color='black', fontsize=7)
+            ax.text((worst_rmse_win[0] + worst_rmse_win[1]) / 2, rmse_y_pos, f'{value:.2f}', ha='center', va='center', color='white', fontsize=7)
 
         #line between best and worst RMSE window
         if not np.isnan(best_rmse_win[0]) and not np.isnan(worst_rmse_win[0]):
@@ -1335,19 +1359,23 @@ def plot_best_and_worst_matching_periods(sliding_results, fig_dir, plot_var=None
     ax.axvline(observed_period[1], color='green', linestyle='--', linewidth=1.5)
     ax.set_yticks(y_positions)
     ax.set_yticklabels(sorted_model_list)
+    n_ensemble = 1 + (within_entry is not None)
+    for label in ax.get_yticklabels()[-n_ensemble:]:
+        label.set_fontweight('bold')
     ax.set_ylim(-0.5, len(sorted_model_list) - 0.5)
     ax.set_xlabel('Year', fontsize=12)
 
     #dynamic x-lim
     all_windows = list(sorted_best_pcc_windows) + list(sorted_best_rmse_windows) + list(sorted_worst_pcc_windows) + list(sorted_worst_rmse_windows)
-    all_years = [year for window in all_windows if not np.isnan(window[0]) for year in window]
+    all_years   = [year for window in all_windows if not np.isnan(window[0]) for year in window]
     all_years.extend(observed_period)
     if all_years:
         min_limit = min(all_years) - 5
         max_limit = max(all_years) + 5
         ax.set_xlim(min_limit, max_limit)
 
-    separator_pos = len(model_names) - 0.5
+    n_ensembles   = 1 + (1 if within_entry is not None else 0)
+    separator_pos = len(sorted_model_list) - n_ensembles - 0.5
     ax.axhline(y=separator_pos, color='gray', linestyle='--', xmin=-0.12, clip_on=False)
 
     ax.set_title(f'Best and worst matching {window_size}-year periods by model ({cfg["name"]} vs. observations)', fontsize=14, fontweight='bold')
@@ -1473,38 +1501,38 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     ens_pcc_arr = np.array(ens_pcc_per_window)
 
     #ensemble labels
-    ensemble_data = {}
+    ensemble_data                      = {}
     ensemble_data[ensemble_mean_label] = {'mean_rmse': np.mean(ens_rmse_arr), 'min_rmse': np.min(ens_rmse_arr), 'max_rmse': np.max(ens_rmse_arr), 'obs_period_rmse': stats_obs_ensemble['rmse'], 'mean_pcc': np.mean(ens_pcc_arr), 'min_pcc': np.min(ens_pcc_arr), 'max_pcc': np.max(ens_pcc_arr),'obs_period_pcc': stats_obs_ensemble['pcc']}
 
     #models within observed range
     def get_models_within_obs_range(fig_dir):
         csv_path = os.path.join(fig_dir, f'regional_model_selection_{cfg["name"]}_{START_YEAR}_{END_YEAR}.csv')
-        df = pd.read_csv(csv_path)
-        mask = (df['North Atlantic_within_obs'] == True) & (~df['source'].isin(['Observed', 'Multi-Model Mean']))
+        df       = pd.read_csv(csv_path)
+        mask     = (df['North Atlantic_within_obs'] == True) & (~df['source'].isin(['Observed', 'Multi-Model Mean']))
         return df.loc[mask, 'source'].tolist()
 
-    selected_models = get_models_within_obs_range(fig_dir)
-    valid_models = [m for m in selected_models if m in cmip_results_ds.model.values]
+    selected_models  = get_models_within_obs_range(fig_dir)
+    valid_models     = [m for m in selected_models if m in cmip_results_ds.model.values]
     within_obs_label = None
-    within_rmse_arr = np.array([])
-    within_pcc_arr = np.array([])
+    within_rmse_arr  = np.array([])
+    within_pcc_arr   = np.array([])
 
     if len(valid_models) > 0:
         within_obs_label = f'Within obs range\nensemble ({len(valid_models)})'
 
-        within_maps = sliding_maps.sel(model=valid_models).mean(dim='model')
+        within_maps            = sliding_maps.sel(model=valid_models).mean(dim='model')
         within_rmse_per_window = []
-        within_pcc_per_window = []
+        within_pcc_per_window  = []
         for ws in within_maps.window_start_year.values:
             s = calculate_weighted_stats(within_maps.sel(window_start_year=ws), ensemble_region_mask, data_y=obs_pattern_data)
             within_rmse_per_window.append(s['rmse'])
             within_pcc_per_window.append(s['pcc'])
 
         within_rmse_arr = np.array(within_rmse_per_window)
-        within_pcc_arr = np.array(within_pcc_per_window)
+        within_pcc_arr  = np.array(within_pcc_per_window)
 
         within_obs_period_pattern = obs_period_model_data.sel(model=valid_models).mean(dim='model')
-        within_obs_stats = calculate_weighted_stats(within_obs_period_pattern, ensemble_region_mask, data_y=obs_pattern_data)
+        within_obs_stats          = calculate_weighted_stats(within_obs_period_pattern, ensemble_region_mask, data_y=obs_pattern_data)
 
         ensemble_data[within_obs_label] = {'mean_rmse': np.mean(within_rmse_arr), 'min_rmse': np.min(within_rmse_arr), 'max_rmse': np.max(within_rmse_arr), 'obs_period_rmse': within_obs_stats['rmse'], 'mean_pcc': np.mean(within_pcc_arr), 'min_pcc': np.min(within_pcc_arr), 'max_pcc': np.max(within_pcc_arr), 'obs_period_pcc': within_obs_stats['pcc']}
 
@@ -1528,7 +1556,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     fig, ax = plt.subplots(figsize=(14, 10))
     
     mean_rmse_all, min_rmse_all, max_rmse_all, obs_period_rmse = df_sorted['mean_rmse'], df_sorted['min_rmse'], df_sorted['max_rmse'], df_sorted['obs_period_rmse']
-    mean_pcc_all, min_pcc_all, max_pcc_all, obs_period_pcc = df_sorted['mean_pcc'], df_sorted['min_pcc'], df_sorted['max_pcc'], df_sorted['obs_period_pcc']
+    mean_pcc_all, min_pcc_all, max_pcc_all, obs_period_pcc     = df_sorted['mean_pcc'], df_sorted['min_pcc'], df_sorted['max_pcc'], df_sorted['obs_period_pcc']
     
     #piControl loading and range
     pi_rmse_min, pi_rmse_max = np.nan, np.nan
@@ -1537,80 +1565,80 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     pi_rmse_pre = None
     if picontrol_results is not None:
         if plot_var == 'trend':
-            pi_pcc_pre = picontrol_results['pcc']
+            pi_pcc_pre  = picontrol_results['pcc']
             pi_rmse_pre = picontrol_results['rmse']
         elif plot_var == 'variability':
-            pi_pcc_pre = picontrol_results['pcc_variability']
+            pi_pcc_pre  = picontrol_results['pcc_variability']
             pi_rmse_pre = picontrol_results['rmse_variability']
         elif plot_var == 'ODSL':
-            pi_pcc_pre = picontrol_results['pcc_mean_odsl']
+            pi_pcc_pre  = picontrol_results['pcc_mean_odsl']
             pi_rmse_pre = picontrol_results['rmse_mean_odsl']
         if pi_pcc_pre is not None and pi_rmse_pre is not None:
             pi_rmse_min = float(np.nanmin(pi_rmse_pre.values))
             pi_rmse_max = float(np.nanmax(pi_rmse_pre.values))
-            pi_pcc_min = float(np.nanmin(pi_pcc_pre.values))
-            pi_pcc_max = float(np.nanmax(pi_pcc_pre.values))
+            pi_pcc_min  = float(np.nanmin(pi_pcc_pre.values))
+            pi_pcc_max  = float(np.nanmax(pi_pcc_pre.values))
 
     #y-axes plotting range
     y_min, y_max = 0, 1
 
     #dynamic range RMSE axis
-    actual_rmse_min = np.nanmin([np.nanmin(min_rmse_all), pi_rmse_min])
-    actual_rmse_max = np.nanmax([np.nanmax(max_rmse_all), pi_rmse_max])
-    rmse_data_range = actual_rmse_max - actual_rmse_min
-    padding = rmse_data_range * 0.05 if rmse_data_range > 0 else 0.1
-    rmse_min_val = max(0, actual_rmse_min - padding)
-    rmse_max_val = actual_rmse_max + padding
-    rmse_range = rmse_max_val - rmse_min_val
+    actual_rmse_min   = np.nanmin([np.nanmin(min_rmse_all), pi_rmse_min])
+    actual_rmse_max   = np.nanmax([np.nanmax(max_rmse_all), pi_rmse_max])
+    rmse_data_range   = actual_rmse_max - actual_rmse_min
+    padding           = rmse_data_range * 0.05 if rmse_data_range > 0 else 0.1
+    rmse_min_val      = max(0, actual_rmse_min - padding)
+    rmse_max_val      = actual_rmse_max + padding
+    rmse_range        = rmse_max_val - rmse_min_val
     rmse_scale_factor = 0.5 / rmse_range if rmse_range > 0 else 0
 
     #dynamic range PCC axis
-    actual_pcc_min = np.nanmin([np.nanmin(min_pcc_all), pi_pcc_min])
-    actual_pcc_max = np.nanmax([np.nanmax(max_pcc_all), pi_pcc_max])
-    pcc_data_range = actual_pcc_max - actual_pcc_min
-    padding = pcc_data_range * 0.05 if pcc_data_range > 0 else 0.1
-    pcc_min_val = actual_pcc_min - padding
-    pcc_max_val = actual_pcc_max + padding
-    pcc_range = pcc_max_val - pcc_min_val
+    actual_pcc_min   = np.nanmin([np.nanmin(min_pcc_all), pi_pcc_min])
+    actual_pcc_max   = np.nanmax([np.nanmax(max_pcc_all), pi_pcc_max])
+    pcc_data_range   = actual_pcc_max - actual_pcc_min
+    padding          = pcc_data_range * 0.05 if pcc_data_range > 0 else 0.1
+    pcc_min_val      = actual_pcc_min - padding
+    pcc_max_val      = actual_pcc_max + padding
+    pcc_range        = pcc_max_val - pcc_min_val
     pcc_scale_factor = 0.5 / pcc_range if pcc_range > 0 else 0
-    pcc_offset = 0.5
+    pcc_offset       = 0.5
 
     mean_rmse_scaled = (mean_rmse_all - rmse_min_val) * rmse_scale_factor
-    min_rmse_scaled = (min_rmse_all - rmse_min_val) * rmse_scale_factor
-    max_rmse_scaled = (max_rmse_all - rmse_min_val) * rmse_scale_factor
-    obs_rmse_scaled = (obs_period_rmse - rmse_min_val) * rmse_scale_factor
+    min_rmse_scaled  = (min_rmse_all - rmse_min_val) * rmse_scale_factor
+    max_rmse_scaled  = (max_rmse_all - rmse_min_val) * rmse_scale_factor
+    obs_rmse_scaled  = (obs_period_rmse - rmse_min_val) * rmse_scale_factor
     
     mean_pcc_scaled = (mean_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
-    min_pcc_scaled = (min_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
-    max_pcc_scaled = (max_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
-    obs_pcc_scaled = (obs_period_pcc - pcc_min_val) * pcc_scale_factor + pcc_offset
+    min_pcc_scaled  = (min_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
+    max_pcc_scaled  = (max_pcc_all - pcc_min_val) * pcc_scale_factor + pcc_offset
+    obs_pcc_scaled  = (obs_period_pcc - pcc_min_val) * pcc_scale_factor + pcc_offset
 
     #'regular' violin plots RMSE and PCC
-    df_rmse_long = rmse_ts.to_dataframe(name='rmse').reset_index()
-    df_pcc_long = pcc_ts.to_dataframe(name='pcc').reset_index()
+    df_rmse_long                = rmse_ts.to_dataframe(name='rmse').reset_index()
+    df_pcc_long                 = pcc_ts.to_dataframe(name='pcc').reset_index()
     df_rmse_long['rmse_scaled'] = (df_rmse_long['rmse'] - rmse_min_val) * rmse_scale_factor
-    df_pcc_long['pcc_scaled'] = (df_pcc_long['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
+    df_pcc_long['pcc_scaled']   = (df_pcc_long['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
 
     #ensemble mean distribution
-    window_starts = ens_mean_maps.window_start_year.values
-    ens_rmse_rows = pd.DataFrame({'model': ensemble_mean_label, 'rmse': ens_rmse_arr, 'window_start_year': window_starts})
-    ens_pcc_rows = pd.DataFrame({'model': ensemble_mean_label, 'pcc': ens_pcc_arr, 'window_start_year': window_starts})
+    window_starts                = ens_mean_maps.window_start_year.values
+    ens_rmse_rows                = pd.DataFrame({'model': ensemble_mean_label, 'rmse': ens_rmse_arr, 'window_start_year': window_starts})
+    ens_pcc_rows                 = pd.DataFrame({'model': ensemble_mean_label, 'pcc': ens_pcc_arr, 'window_start_year': window_starts})
     ens_rmse_rows['rmse_scaled'] = (ens_rmse_rows['rmse'] - rmse_min_val) * rmse_scale_factor
-    ens_pcc_rows['pcc_scaled'] = (ens_pcc_rows['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
+    ens_pcc_rows['pcc_scaled']   = (ens_pcc_rows['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
 
     df_rmse_long = pd.concat([df_rmse_long, ens_rmse_rows], ignore_index=True)
-    df_pcc_long = pd.concat([df_pcc_long, ens_pcc_rows], ignore_index=True)
+    df_pcc_long  = pd.concat([df_pcc_long, ens_pcc_rows], ignore_index=True)
 
     #within observations ensemble violin data
     if within_obs_label is not None:
-        window_starts = ens_mean_maps.window_start_year.values
-        ens_within_rmse_rows = pd.DataFrame({'model': within_obs_label, 'rmse': within_rmse_arr, 'window_start_year': window_starts})
-        ens_within_pcc_rows = pd.DataFrame({'model': within_obs_label, 'pcc': within_pcc_arr, 'window_start_year': window_starts})
+        window_starts                       = ens_mean_maps.window_start_year.values
+        ens_within_rmse_rows                = pd.DataFrame({'model': within_obs_label, 'rmse': within_rmse_arr, 'window_start_year': window_starts})
+        ens_within_pcc_rows                 = pd.DataFrame({'model': within_obs_label, 'pcc': within_pcc_arr, 'window_start_year': window_starts})
         ens_within_rmse_rows['rmse_scaled'] = (ens_within_rmse_rows['rmse'] - rmse_min_val) * rmse_scale_factor
-        ens_within_pcc_rows['pcc_scaled'] = (ens_within_pcc_rows['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
+        ens_within_pcc_rows['pcc_scaled']   = (ens_within_pcc_rows['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
 
         df_rmse_long = pd.concat([df_rmse_long, ens_within_rmse_rows], ignore_index=True)
-        df_pcc_long = pd.concat([df_pcc_long, ens_within_pcc_rows], ignore_index=True)
+        df_pcc_long  = pd.concat([df_pcc_long, ens_within_pcc_rows], ignore_index=True)
 
     model_order = df_sorted.index.tolist()
 
@@ -1622,12 +1650,12 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     #piControl violin plots
     if picontrol_results is not None and pi_pcc_pre is not None and pi_rmse_pre is not None:
         pi_rmse_rows = []
-        pi_pcc_rows = []
+        pi_pcc_rows  = []
         for model_name in model_order:
             if model_name in pi_pcc_pre.model.values: # type: ignore
-                pcc_vals = pi_pcc_pre.sel(model=model_name).values # type: ignore
+                pcc_vals  = pi_pcc_pre.sel(model=model_name).values # type: ignore
                 rmse_vals = pi_rmse_pre.sel(model=model_name).values # type: ignore
-                pcc_vals = pcc_vals[~np.isnan(pcc_vals)]
+                pcc_vals  = pcc_vals[~np.isnan(pcc_vals)]
                 rmse_vals = rmse_vals[~np.isnan(rmse_vals)]
                 for v in rmse_vals:
                     pi_rmse_rows.append({'model': model_name, 'rmse': v})
@@ -1640,13 +1668,13 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
         if ensemble_mean_label in model_order:
             if plot_var == 'trend':
                 pi_ens_rmse_vals = picontrol_results['pi_ensemble_rmse'].values
-                pi_ens_pcc_vals = picontrol_results['pi_ensemble_pcc'].values
+                pi_ens_pcc_vals  = picontrol_results['pi_ensemble_pcc'].values
             elif plot_var == 'variability':
                 pi_ens_rmse_vals = picontrol_results['pi_ensemble_rmse_variability'].values
-                pi_ens_pcc_vals = picontrol_results['pi_ensemble_pcc_variability'].values
+                pi_ens_pcc_vals  = picontrol_results['pi_ensemble_pcc_variability'].values
             elif plot_var == 'ODSL':
                 pi_ens_rmse_vals = picontrol_results['pi_ensemble_rmse_mean_odsl'].values
-                pi_ens_pcc_vals = picontrol_results['pi_ensemble_pcc_mean_odsl'].values
+                pi_ens_pcc_vals  = picontrol_results['pi_ensemble_pcc_mean_odsl'].values
             
             for v in pi_ens_rmse_vals[~np.isnan(pi_ens_rmse_vals)]:
                 pi_rmse_rows.append({'model': ensemble_mean_label, 'rmse': v})
@@ -1655,17 +1683,17 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
 
         #piControl within-obs ensemble
         pi_within_rmse_vals = np.array([])
-        pi_within_pcc_vals = np.array([])
+        pi_within_pcc_vals  = np.array([])
         if within_obs_label is not None and within_obs_label in model_order:
             if plot_var == 'trend':
                 pi_within_rmse_vals = picontrol_results['pi_within_obs_rmse'].values
-                pi_within_pcc_vals = picontrol_results['pi_within_obs_pcc'].values
+                pi_within_pcc_vals  = picontrol_results['pi_within_obs_pcc'].values
             elif plot_var == 'variability':
                 pi_within_rmse_vals = picontrol_results['pi_within_obs_rmse_variability'].values
-                pi_within_pcc_vals = picontrol_results['pi_within_obs_pcc_variability'].values
+                pi_within_pcc_vals  = picontrol_results['pi_within_obs_pcc_variability'].values
             elif plot_var == 'ODSL':
                 pi_within_rmse_vals = picontrol_results['pi_within_obs_rmse_mean_odsl'].values
-                pi_within_pcc_vals = picontrol_results['pi_within_obs_pcc_mean_odsl'].values
+                pi_within_pcc_vals  = picontrol_results['pi_within_obs_pcc_mean_odsl'].values
 
             for v in pi_within_rmse_vals[~np.isnan(pi_within_rmse_vals)]:
                 pi_rmse_rows.append({'model': within_obs_label, 'rmse': v})
@@ -1673,10 +1701,10 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
                 pi_pcc_rows.append({'model': within_obs_label, 'pcc': v})
 
         if pi_rmse_rows:
-            df_pi_rmse = pd.DataFrame(pi_rmse_rows)
-            df_pi_pcc = pd.DataFrame(pi_pcc_rows)
+            df_pi_rmse                = pd.DataFrame(pi_rmse_rows)
+            df_pi_pcc                 = pd.DataFrame(pi_pcc_rows)
             df_pi_rmse['rmse_scaled'] = (df_pi_rmse['rmse'] - rmse_min_val) * rmse_scale_factor
-            df_pi_pcc['pcc_scaled'] = (df_pi_pcc['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
+            df_pi_pcc['pcc_scaled']   = (df_pi_pcc['pcc'] - pcc_min_val) * pcc_scale_factor + pcc_offset
 
             n_before = len(ax.collections)
             
@@ -1707,7 +1735,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
 
     #select distinction between models and ensembles
     obs_ensemble_idx = len(model_names) - 3
-    x_models = x[:-n_ensembles]
+    x_models         = x[:-n_ensembles]
 
     #range RMSE
     ax.errorbar(x_models, mean_rmse_scaled.iloc[:-n_ensembles], yerr=[mean_rmse_scaled.iloc[:-n_ensembles] - min_rmse_scaled.iloc[:-n_ensembles], max_rmse_scaled.iloc[:-n_ensembles] - mean_rmse_scaled.iloc[:-n_ensembles]], fmt='none', color='black', capsize=6, capthick=1.5, label='RMSE range (all sliding windows)')
@@ -1731,7 +1759,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     #mean line and range for within-obs ensemble
     if within_obs_label is not None:
         within_idx = model_names.index(within_obs_label)
-        within_x = x[within_idx]
+        within_x   = x[within_idx]
         if not np.isnan(mean_rmse_scaled.iloc[within_idx]):
             ax.plot([within_x - 0.2, within_x + 0.2], [mean_rmse_scaled.iloc[within_idx]] * 2, color='black', linewidth=2, zorder=3)
             ax.errorbar(within_x, mean_rmse_scaled.iloc[within_idx], yerr=[[mean_rmse_scaled.iloc[within_idx] - min_rmse_scaled.iloc[within_idx]], [max_rmse_scaled.iloc[within_idx] - mean_rmse_scaled.iloc[within_idx]]], fmt='none', color='black', capsize=6, capthick=1.5)
@@ -1753,7 +1781,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     num_ticks = 5
 
     #RMSE y-axis ticks
-    scaled_rmse_ticks = np.linspace(0, 0.5, num_ticks)
+    scaled_rmse_ticks    = np.linspace(0, 0.5, num_ticks)
     original_rmse_labels = scaled_rmse_ticks / rmse_scale_factor + rmse_min_val
     ax.set_yticks(scaled_rmse_ticks)
     ax.set_yticklabels([f'{val:.1f}' for val in original_rmse_labels])
@@ -1761,7 +1789,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     ax.tick_params(axis='y', labelcolor='black')
 
     #PCC y-axis ticks
-    scaled_pcc_ticks = np.linspace(0.5, 1.0, num_ticks)
+    scaled_pcc_ticks    = np.linspace(0.5, 1.0, num_ticks)
     original_pcc_labels = (scaled_pcc_ticks - pcc_offset) / pcc_scale_factor + pcc_min_val
     ax2.set_yticks(scaled_pcc_ticks)
     ax2.set_yticklabels([f'{val:.1f}' for val in original_pcc_labels])
@@ -1778,7 +1806,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     ax.set_xticklabels(model_names, rotation=90, ha='center', va='top', fontsize=10)
     ax.set_xlim(-0.5, len(model_names) - 0.5)
 
-    ax.set_title(f'Model-observation ODSL comparison ({cfg["name"]})\nMean statistics over all {window_size}-yr sliding windows', fontsize=14, pad=20, fontweight='bold')
+    ax.set_title(f'Model-observation ODSL comparison {cfg["name"]} ({SLIDING_START_YEAR} - 2024)\nMean statistics over all {window_size}-yr sliding windows', fontsize=14, pad=20, fontweight='bold')
     
     #grid lines
     for tick in ax.get_yticks():
@@ -1790,7 +1818,7 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
     handles, labels = ax.get_legend_handles_labels()
 
     rmse_violin_patch = mpatches.Patch(color='grey', alpha=0.7, label='RMSE distribution (all sliding windows)')
-    pcc_violin_patch = mpatches.Patch(color='red', alpha=0.7, label='PCC distribution (all sliding windows)')
+    pcc_violin_patch  = mpatches.Patch(color='red', alpha=0.7, label='PCC distribution (all sliding windows)')
     handles.extend([rmse_violin_patch, pcc_violin_patch])
     labels.extend(['RMSE distribution (all sliding windows)', 'PCC distribution (all sliding windows)'])
     obs_period_dot = mlines.Line2D([], [], color='green', marker='o', linestyle='None', markersize=8, label='PCC & RMSE over observed period')
@@ -1812,9 +1840,9 @@ def plot_model_comparison_summary(cmip_results_ds, sliding_results_ds, fig_dir, 
         
         desired_order.extend(['RMSE & PCC distribution (piControl)'])
 
-    label_handle_map = dict(zip(labels, handles))
+    label_handle_map  = dict(zip(labels, handles))
     reordered_handles = [label_handle_map[label] for label in desired_order if label in label_handle_map]
-    reordered_labels = [label for label in desired_order if label in label_handle_map]
+    reordered_labels  = [label for label in desired_order if label in label_handle_map]
     ax.legend(reordered_handles, reordered_labels, loc='upper left', bbox_to_anchor=(0, 0.53), fontsize=11)
 
     plt.tight_layout()
@@ -1877,197 +1905,185 @@ def plot_scenario_timeseries(scenario_results, obs_results, fig_dir):
     #scenario config
     if CMIP_VERSION == 'CMIP6':
         future_scenarios = ['ssp126', 'ssp245', 'ssp585']
-        scenario_colors = {'historical': 'black',
-                           'ssp126': '#377eb8',
-                           'ssp245': '#e41a1c',
-                           'ssp585': '#f2ff00'}
-        scenario_labels = {'historical': 'Historical',
-                           'ssp126': 'SSP1-2.6',
-                           'ssp245': 'SSP2-4.5',
-                           'ssp585': 'SSP5-8.5'}
+        scenario_colors  = {'historical': 'black', 'ssp126': '#377eb8', 'ssp245': '#e41a1c', 'ssp585': '#f2ff00'}
+        scenario_labels  = {'historical': 'Historical', 'ssp126': 'SSP1-2.6', 'ssp245': 'SSP2-4.5', 'ssp585': 'SSP5-8.5'}
     else:  #CMIP5
         future_scenarios = ['rcp26', 'rcp45', 'rcp85']
-        scenario_colors = {'historical': 'black',
-                           'rcp26': '#377eb8',
-                           'rcp45': '#e41a1c',
-                           'rcp85': '#f2ff00'}
-        scenario_labels = {'historical': 'Historical',
-                           'rcp26': 'RCP 2.6',
-                           'rcp45': 'RCP 4.5',
-                           'rcp85': 'RCP 8.5'}
+        scenario_colors  = {'historical': 'black', 'rcp26': '#377eb8', 'rcp45': '#e41a1c', 'rcp85': '#f2ff00'}
+        scenario_labels  = {'historical': 'Historical', 'rcp26': 'RCP 2.6', 'rcp45': 'RCP 4.5', 'rcp85': 'RCP 8.5'}
+
+    #per-model historical
+    hist_per_model = data.sel(scenario='historical')['odsl_per_model']
+    hist_models    = set(hist_per_model.dropna(dim='model', how='all').model.values.tolist())
+
+    #intersection: models with historical AND every future scenario
+    common_models = hist_models.copy()
+    for scenario in future_scenarios:
+        fut_pm   = data.sel(scenario=scenario)['odsl_per_model']
+        fut_mdls = set(fut_pm.dropna(dim='model', how='all').model.values.tolist())
+        common_models &= fut_mdls
+    common_models = sorted(common_models)
+
+    if not common_models:
+        print("No models common to historical and all future scenarios.")
+        return
+
+    #historical line built from the common matched set
+    hist_common         = hist_per_model.sel(model=common_models).dropna(dim='year', how='all')
+    hist_mean_common    = hist_common.mean(dim='model', skipna=True)
+    hist_std_common     = hist_common.std(dim='model', skipna=True)
+    n_models_hist       = len(common_models)
+    historical_end_year = int(hist_mean_common.year.values[-1])
 
     #plotting
     fig, ax = plt.subplots(figsize=(12, 7))
-    
+
     #historical
-    hist_data = data.sel(scenario='historical').dropna(dim='year')
-    n_models_hist = int(hist_data.n_models.values)
-    historical_end_year = int(hist_data.year.values[-1])
-    
-    ax.plot(hist_data.year, hist_data['odsl_ensemble_mean'] / 10, color=scenario_colors['historical'], linewidth=2.5, label=f'Historical (n={n_models_hist})') #mm -> cm
-    ax.fill_between(hist_data.year, (hist_data['odsl_ensemble_mean'] - hist_data['odsl_ensemble_std']) / 10, (hist_data['odsl_ensemble_mean'] + hist_data['odsl_ensemble_std']) / 10, color='black', alpha=0.15)
-    
-    upper_bound = (hist_data['odsl_ensemble_mean'] + hist_data['odsl_ensemble_std']) / 10
-    lower_bound = (hist_data['odsl_ensemble_mean'] - hist_data['odsl_ensemble_std']) / 10
-    ax.plot(hist_data.year, upper_bound, color='black', linewidth=0.8, linestyle=':', alpha=0.5)
-    ax.plot(hist_data.year, lower_bound, color='black', linewidth=0.8, linestyle=':', alpha=0.5)
-    
-    #historical mean
-    hist_mean = float(hist_data['odsl_ensemble_mean'].mean().item() / 10)
-    
+    ax.plot(hist_mean_common.year, hist_mean_common / 10, color=scenario_colors['historical'], linewidth=2.5, label=f'Historical (n={n_models_hist})')
+    ax.fill_between(hist_mean_common.year, (hist_mean_common - hist_std_common) / 10, (hist_mean_common + hist_std_common) / 10, color='black', alpha=0.15)
+    upper = (hist_mean_common + hist_std_common) / 10
+    lower = (hist_mean_common - hist_std_common) / 10
+    ax.plot(hist_mean_common.year, upper, color='black', linewidth=0.8, linestyle=':', alpha=0.5)
+    ax.plot(hist_mean_common.year, lower, color='black', linewidth=0.8, linestyle=':', alpha=0.5)
+
     #future scenarios
     for scenario in future_scenarios:
-        future_data = data.sel(scenario=scenario, year=slice(historical_end_year + 1, None)).dropna(dim='year')
-        
-        if future_data.year.size > 0:
-            color    = scenario_colors[scenario]
-            n_models = int(future_data.n_models.values)
-            label    = f'{scenario_labels[scenario]} (n={n_models})'
-            
-            last_hist = hist_data.isel(year=-1)
-            connected = xr.concat([last_hist, future_data], dim='year', data_vars='minimal', coords='minimal', compat='override')
-            
-            ax.plot(connected.year, connected['odsl_ensemble_mean'] / 10, color=color, linewidth=2, label=label)
-            ax.fill_between(connected.year, (connected['odsl_ensemble_mean'] - connected['odsl_ensemble_std']) / 10, (connected['odsl_ensemble_mean'] + connected['odsl_ensemble_std']) / 10, color=color, alpha=0.15)
-            #uncertainty bounds
-            upper_bound = (connected['odsl_ensemble_mean'] + connected['odsl_ensemble_std']) / 10
-            lower_bound = (connected['odsl_ensemble_mean'] - connected['odsl_ensemble_std']) / 10
-            ax.plot(connected.year, upper_bound, color=color, linewidth=0.8, linestyle=':', alpha=0.5)
-            ax.plot(connected.year, lower_bound, color=color, linewidth=0.8, linestyle=':', alpha=0.5)
-    
+        fut_per_model = data.sel(scenario=scenario)['odsl_per_model']
+        fut_sub       = fut_per_model.sel(model=common_models).sel(year=slice(historical_end_year + 1, None)).dropna(dim='year', how='all')
+        if fut_sub.year.size == 0:
+            continue
+        fut_mean = fut_sub.mean(dim='model', skipna=True)
+        fut_std  = fut_sub.std(dim='model', skipna=True)
+
+        last_year = int(hist_mean_common.year.values[-1])
+        last_mean = float(hist_mean_common.isel(year=-1).item())
+        last_std  = float(hist_std_common.isel(year=-1).item())
+
+        conn_years = np.concatenate([[last_year], fut_mean.year.values])
+        conn_mean  = np.concatenate([[last_mean], fut_mean.values])
+        conn_std   = np.concatenate([[last_std],  fut_std.values])
+
+        color = scenario_colors[scenario]
+        label = f'{scenario_labels[scenario]} (n={len(common_models)})'
+
+        ax.plot(conn_years, conn_mean / 10, color=color, linewidth=2, label=label)
+        ax.fill_between(conn_years, (conn_mean - conn_std) / 10, (conn_mean + conn_std) / 10, color=color, alpha=0.15)
+        ax.plot(conn_years, (conn_mean + conn_std) / 10, color=color, linewidth=0.8, linestyle=':', alpha=0.5)
+        ax.plot(conn_years, (conn_mean - conn_std) / 10, color=color, linewidth=0.8, linestyle=':', alpha=0.5)
+
     #zero reference line
     ax.axhline(0, color='grey', linestyle='-', linewidth=0.8, alpha=0.5)
-    
+
     #observed period shading
     ax.axvline(START_YEAR, color='green', linestyle='--', alpha=0.6, linewidth=1.5)
-    ax.axvline(END_YEAR, color='green', linestyle='--', alpha=0.6, linewidth=1.5)
+    ax.axvline(END_YEAR,   color='green', linestyle='--', alpha=0.6, linewidth=1.5)
     ax.axvspan(START_YEAR, END_YEAR, color='green', alpha=0.1, zorder=0)
-    
+
     #formatting
     ax.set_xlim(data.year.min().item(), 2100)
     ax.set_ylabel('ODSL (cm)', fontsize=12)
     ax.set_xlabel('Year', fontsize=12)
     ax.grid(True, alpha=0.3)
-    
-    #legend with std dev explanation
+
+    #legend
     handles, labels = ax.get_legend_handles_labels()
-    observed_patch = mpatches.Patch(color='green', alpha=0.2, label='Observed period')
+    observed_patch  = mpatches.Patch(color='green', alpha=0.2, label='Observed period')
     handles.append(observed_patch)
     labels.append('Observed period')
-    
     ax.legend(handles, labels, loc='upper left', fontsize=10, framealpha=0.9, title=r'Ensemble mean $\pm$ 1 std. dev.', title_fontsize=10)
-    
+
     ax.set_title(f'{CMIP_VERSION} North Atlantic ODSL ensemble projections', fontsize=14, fontweight='bold')
-    
+
     #INSET PLOT
     ax_inset = ax.inset_axes((0.25, 0.49, 0.5, 0.45))
 
     period_averages = {}
     period_trends   = {}
     final_y_values  = {}
-    
-    #historical
-    obs_period_hist = hist_data.sel(year=slice(START_YEAR, min(END_YEAR, historical_end_year)))
-    ax_inset.plot(obs_period_hist.year, obs_period_hist['odsl_ensemble_mean'] / 10, color=scenario_colors['historical'], linewidth=2)
-    ax_inset.fill_between(obs_period_hist.year, (obs_period_hist['odsl_ensemble_mean'] - obs_period_hist['odsl_ensemble_std']) / 10, (obs_period_hist['odsl_ensemble_mean'] + obs_period_hist['odsl_ensemble_std']) / 10, color='black', alpha=0.15)
-    final_y_values['historical'] = float(obs_period_hist['odsl_ensemble_mean'].isel(year=-1) / 10)
 
-    #uncertainty bounds
-    upper_bound = (obs_period_hist['odsl_ensemble_mean'] + obs_period_hist['odsl_ensemble_std']) / 10
-    lower_bound = (obs_period_hist['odsl_ensemble_mean'] - obs_period_hist['odsl_ensemble_std']) / 10
-    ax_inset.plot(obs_period_hist.year, upper_bound, color='black', linewidth=0.6, linestyle=':', alpha=0.5)
-    ax_inset.plot(obs_period_hist.year, lower_bound, color='black', linewidth=0.6, linestyle=':', alpha=0.5)
-    
-    #historical trends
-    hist_years    = obs_period_hist.year.values
-    hist_values   = obs_period_hist['odsl_ensemble_mean'].values / 10
-    hist_trend, _ = np.polyfit(hist_years, hist_values, 1)
-    period_trends['historical'] = hist_trend * 10
+    #historical in inset
+    obs_period_hist_mean = hist_mean_common.sel(year=slice(START_YEAR, min(END_YEAR, historical_end_year)))
+    obs_period_hist_std  = hist_std_common.sel(year=obs_period_hist_mean.year)
 
-    #future scenarios inset
+    ax_inset.plot(obs_period_hist_mean.year, obs_period_hist_mean / 10, color=scenario_colors['historical'], linewidth=2)
+    ax_inset.fill_between(obs_period_hist_mean.year, (obs_period_hist_mean - obs_period_hist_std) / 10, (obs_period_hist_mean + obs_period_hist_std) / 10, color='black', alpha=0.15)
+    final_y_values['historical'] = float(obs_period_hist_mean.isel(year=-1).item() / 10)
+
+    upper = (obs_period_hist_mean + obs_period_hist_std) / 10
+    lower = (obs_period_hist_mean - obs_period_hist_std) / 10
+    ax_inset.plot(obs_period_hist_mean.year, upper, color='black', linewidth=0.6, linestyle=':', alpha=0.5)
+    ax_inset.plot(obs_period_hist_mean.year, lower, color='black', linewidth=0.6, linestyle=':', alpha=0.5)
+
+    #future scenarios in inset
     for scenario in future_scenarios:
-        future_data = data.sel(scenario=scenario, year=slice(historical_end_year + 1, END_YEAR)).dropna(dim='year')
-        
-        if future_data.year.size > 0:
-            color = scenario_colors[scenario]
-            
-            #connect to last historical point
-            last_hist = obs_period_hist.isel(year=-1)
-            connected = xr.concat([last_hist, future_data], dim='year', data_vars='minimal', coords='minimal', compat='override')
-            
-            ax_inset.plot(connected.year, connected['odsl_ensemble_mean'] / 10, color=color, linewidth=2)
-            ax_inset.fill_between(connected.year, (connected['odsl_ensemble_mean'] - connected['odsl_ensemble_std']) / 10, (connected['odsl_ensemble_mean'] + connected['odsl_ensemble_std']) / 10, color=color, alpha=0.15)
-            
-            #uncertainty bounds
-            upper_bound = (connected['odsl_ensemble_mean'] + connected['odsl_ensemble_std']) / 10
-            lower_bound = (connected['odsl_ensemble_mean'] - connected['odsl_ensemble_std']) / 10
-            ax_inset.plot(connected.year, upper_bound, color=color, linewidth=0.6, linestyle=':', alpha=0.5)
-            ax_inset.plot(connected.year, lower_bound, color=color, linewidth=0.6, linestyle=':', alpha=0.5)
+        fut_per_model = data.sel(scenario=scenario)['odsl_per_model']
 
-            #average over observed period
-            combined_data             = xr.concat([obs_period_hist, future_data], dim='year')
-            period_avg                = float(combined_data['odsl_ensemble_mean'].mean().item() / 10) 
-            period_averages[scenario] = period_avg
+        #future portion within observed period
+        fut_sub = fut_per_model.sel(model=common_models).sel(year=slice(historical_end_year + 1, END_YEAR)).dropna(dim='year', how='all')
+        if fut_sub.year.size == 0:
+            continue
+        fut_mean = fut_sub.mean(dim='model', skipna=True)
+        fut_std  = fut_sub.std(dim='model', skipna=True)
 
-            #trend over observed period
-            combined_years           = combined_data.year.values
-            combined_values          = combined_data['odsl_ensemble_mean'].values / 10 # type: ignore[operator]
-            trend, _                 = np.polyfit(combined_years, combined_values, 1)
-            period_trends[scenario]  = trend * 10
-            final_y_values[scenario] = float(combined_data['odsl_ensemble_mean'].isel(year=-1).item() / 10)
+        #connect future to last hist point for visual
+        last_year = int(obs_period_hist_mean.year.values[-1])
+        last_mean = float(obs_period_hist_mean.isel(year=-1).item())
+        last_std  = float(obs_period_hist_std.isel(year=-1).item())
+
+        conn_years = np.concatenate([[last_year], fut_mean.year.values])
+        conn_mean  = np.concatenate([[last_mean], fut_mean.values])
+        conn_std   = np.concatenate([[last_std],  fut_std.values])
+
+        color = scenario_colors[scenario]
+        ax_inset.plot(conn_years, conn_mean / 10, color=color, linewidth=2)
+        ax_inset.fill_between(conn_years, (conn_mean - conn_std) / 10, (conn_mean + conn_std) / 10, color=color, alpha=0.15)
+        ax_inset.plot(conn_years, (conn_mean + conn_std) / 10, color=color, linewidth=0.6, linestyle=':', alpha=0.5)
+        ax_inset.plot(conn_years, (conn_mean - conn_std) / 10, color=color, linewidth=0.6, linestyle=':', alpha=0.5)
+
+        #trend on the full matched (hist + future) timeseries within the observed period
+        matched_combined = xr.concat([obs_period_hist_mean, fut_mean], dim='year')
+        period_averages[scenario] = float(matched_combined.mean().item() / 10)
+        years    = matched_combined.year.values
+        values   = matched_combined.values / 10  # type: ignore[operator]
+        trend, _ = np.polyfit(years, values, 1)
+        period_trends[scenario]  = trend * 10
+        final_y_values[scenario] = float(matched_combined.isel(year=-1).item() / 10)
 
     #observed data inset
     obs_avg   = None
     obs_trend = None
     if obs_results is not None and 'odsl_yearly' in obs_results:
 
-        odsl_yearly = obs_results['odsl_yearly']
-        
-        #regional mean
-        #weighing for latitude
+        odsl_yearly  = obs_results['odsl_yearly']
         weights      = np.cos(np.deg2rad(odsl_yearly.latitude))
         weights.name = "weights"
-        
-        #select North Atlantic region
+
         mask              = create_region_mask(odsl_yearly.isel(year=0), EXTENT)
         obs_regional_mean = odsl_yearly.where(mask).weighted(weights).mean(dim=['latitude', 'longitude'])
+        obs_period_obs    = obs_regional_mean.sel(year=slice(START_YEAR, END_YEAR))
 
-        #period
-        obs_period_obs = obs_regional_mean.sel(year=slice(START_YEAR, END_YEAR))
-
-        #reference to 1993-1997 period
         ref_period     = obs_period_obs.sel(year=slice(1993, 1997))
         obs_ref_mean   = float(ref_period.mean().item())
         obs_period_obs = obs_period_obs - obs_ref_mean
-        
-        ax_inset.plot(obs_period_obs.year, obs_period_obs / 10, color='green', linewidth=2, linestyle='-', label='Observed', zorder=15)
-        
-        #avg
-        obs_avg = float(obs_period_obs.mean() / 10)
 
-        #trend
-        obs_years                  = obs_period_obs.year.values
-        obs_values                 = obs_period_obs.values / 10
-        obs_trend_val, _           = np.polyfit(obs_years, obs_values, 1)
-        obs_trend                  = obs_trend_val * 10
+        ax_inset.plot(obs_period_obs.year, obs_period_obs / 10, color='green', linewidth=2, linestyle='-', label='Observed', zorder=15)
+
+        obs_avg          = float(obs_period_obs.mean() / 10)
+        obs_years        = obs_period_obs.year.values
+        obs_values       = obs_period_obs.values / 10  # type: ignore[operator]
+        obs_trend_val, _ = np.polyfit(obs_years, obs_values, 1)
+        obs_trend        = obs_trend_val * 10
         final_y_values['observed'] = float(obs_period_obs.isel(year=-1) / 10)
-    
-    #table in figure
-    #average text box inset
-    avg_text_lines = [r"                             $\bf{{Mean\ |\ Trend}}$"] # type: ignore
-    
-    #observed avg and trend
+
+    #table
+    avg_text_lines = [r"                             $\bf{{Mean\ |\ Trend}}$"]
     if obs_avg is not None:
         avg_text_lines.append(f"                 Observed: {obs_avg:.2f} cm | {obs_trend:+.1f} mm/yr")
-
-    #scenario avg and trend
     for scenario in future_scenarios:
         if scenario in period_averages:
             avg_text_lines.append(f"Historical + {scenario_labels[scenario]}:  {period_averages[scenario]:.2f} cm | {period_trends[scenario]:+.1f} mm/yr")
-    
+
     avg_text = '\n'.join(avg_text_lines)
-    
-    #avg text box inset
     ax_inset.text(0.3, 0.65, avg_text, transform=ax_inset.transAxes, fontsize=8, verticalalignment='bottom', horizontalalignment='center', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.9, edgecolor='gray'))
 
     #formatting inset
@@ -2079,7 +2095,7 @@ def plot_scenario_timeseries(scenario_results, obs_results, fig_dir):
     ax_inset.axhline(0, color='grey', linestyle='-', linewidth=0.5, alpha=0.5)
     ax_inset.set_title(f'Observed period ({START_YEAR}-{END_YEAR})', fontsize=10, fontweight='bold')
     ax_inset.legend(loc='lower right', fontsize=8, framealpha=0.9)
-    
+
     #rectangle indicating inset
     ax.indicate_inset((START_YEAR, ax_inset.get_ylim()[0], END_YEAR - START_YEAR, ax_inset.get_ylim()[1] - ax_inset.get_ylim()[0]), edgecolor='green', linewidth=1.5, alpha=0.8)
 
@@ -2190,87 +2206,129 @@ def plot_spatial_eofs(all_eof_results, fig_dir, num_modes_to_plot=3):
         #plt.show()
         plt.close(fig)
 
-def plot_pc_timeseries(dual_eof_results, fig_dir, num_modes_to_plot=5, normalize=False):
-    """PC time series for all sources, standard (solid) vs rotated (dashed)."""
+def plot_pc_timeseries(dual_eof_results, dual_eof_results_historical, fig_dir, num_modes_to_plot=5, normalize=False):
+    """PC time series. Left column historical (1850-2024), right column altimetry era (1993-2024)."""
 
     print(f"Generating PC time series plot ({'normalised' if normalize else 'raw'})...")
 
-    PRIORITY           = ['observed', 'multi model mean']
-    individual_sources = sorted([s for s in set(k.rsplit('__', 1)[0] for k in dual_eof_results) if s not in PRIORITY])
-    source_order       = individual_sources + [s for s in PRIORITY if f'{s}__unrotated' in dual_eof_results]
+    PRIORITY = ['observed', 'multi model mean']
 
-    fig, axes = plt.subplots(num_modes_to_plot, 1, figsize=(14, num_modes_to_plot * 3), sharex=True)
+    #left historical, right observed period
+    left_individuals  = sorted([s for s in set(k.rsplit('__', 1)[0] for k in dual_eof_results_historical) if s not in PRIORITY and s != 'observed'])
+    left_order        = left_individuals + (['multi model mean'] if 'multi model mean__unrotated' in dual_eof_results_historical else [])
+    right_individuals = sorted([s for s in set(k.rsplit('__', 1)[0] for k in dual_eof_results) if s not in PRIORITY])
+    right_order       = right_individuals + [s for s in PRIORITY if f'{s}__unrotated' in dual_eof_results]
+
+    subplot_height = 3.8
+    fig_height     = num_modes_to_plot * subplot_height
+    fig, axes      = plt.subplots(nrows=num_modes_to_plot, ncols=2, figsize=(18, fig_height), gridspec_kw={'width_ratios': [3, 2], 'wspace': 0.02, 'hspace': 0.45}, sharey='row' if normalize else False)
+
     if num_modes_to_plot == 1:
-        axes = [axes]
+        axes = axes.reshape(1, -1)
+
+    def _plot_source(ax, dual_dict, source_name, mode_idx, first_grey_name):
+        unrot_key = f'{source_name}__unrotated'
+        rot_key   = f'{source_name}__rotated'
+        if unrot_key not in dual_dict or rot_key not in dual_dict:
+            return
+
+        pc_unrot = dual_dict[unrot_key]['pcs'].sel(mode=mode_idx)
+        pc_rot   = dual_dict[rot_key]['pcs'].sel(mode=mode_idx)
+        if normalize:
+            pc_unrot = (pc_unrot - pc_unrot.mean()) / pc_unrot.std()
+            pc_rot   = (pc_rot   - pc_rot.mean())   / pc_rot.std()
+        time_vals = pc_unrot.time.values
+
+        if source_name == 'observed':
+            color, lw, alpha, zorder = 'green', 2.0, 0.9, 10
+            l_unrot, l_rot           = 'Observed (standard)', 'Observed (rotated)'
+        elif source_name == 'multi model mean':
+            color, lw, alpha, zorder = 'black', 2.0, 0.9, 9
+            l_unrot, l_rot           = 'Multi-model mean (standard)', 'Multi-model mean (rotated)'
+        else:
+            color, lw, alpha, zorder = 'grey', 0.6, 0.4, 2
+            if source_name == first_grey_name:
+                l_unrot, l_rot = 'Individual models (standard)', 'Individual models (rotated)'
+            else:
+                l_unrot, l_rot = '', ''
+
+        ax.plot(time_vals, pc_unrot, color=color, lw=lw, ls='-',  alpha=alpha, zorder=zorder, label=l_unrot)
+        ax.plot(time_vals, pc_rot,   color=color, lw=lw, ls='--', alpha=alpha, zorder=zorder, label=l_rot)
 
     for mode_idx in range(num_modes_to_plot):
-        ax = axes[mode_idx]
-        subplot_letter = chr(97 + mode_idx)
+        ax_full  = axes[mode_idx, 0]  
+        ax_obs   = axes[mode_idx, 1]  
+        letter_l = chr(97 + mode_idx)
+        letter_r = chr(97 + num_modes_to_plot + mode_idx)
 
-        for source_name in source_order:
-            unrot_key = f'{source_name}__unrotated'
-            rot_key   = f'{source_name}__rotated'
+        #left column historical (1850-2024)
+        ax_full.axvspan(START_YEAR, END_YEAR, color='green', alpha=0.10, zorder=0)
+        ax_full.axvline(START_YEAR, color='green', ls='--', lw=1.0, alpha=0.6, zorder=1)
+        ax_full.axvline(END_YEAR,   color='green', ls='--', lw=1.0, alpha=0.6, zorder=1)
 
-            if unrot_key not in dual_eof_results or rot_key not in dual_eof_results:
-                continue
+        first_left = left_individuals[0] if left_individuals else None
+        for s in left_order:
+            _plot_source(ax_full, dual_eof_results_historical, s, mode_idx, first_left)
+        ax_full.axhline(0, color='grey', lw=0.5)
 
-            pc_unrot = dual_eof_results[unrot_key]['pcs'].sel(mode=mode_idx)
-            pc_rot   = dual_eof_results[rot_key]['pcs'].sel(mode=mode_idx)
+        try:
+            v_u_h     = dual_eof_results_historical['multi model mean__unrotated']['variance_fractions'].sel(mode=mode_idx).item() * 100
+            v_r_h     = dual_eof_results_historical['multi model mean__rotated']['variance_fractions'].sel(mode=mode_idx).item() * 100
+            var_str_l = f'Standard EV: {v_u_h:.1f}% | rotated EV: {v_r_h:.1f}%'
+        except KeyError:
+            var_str_l = ''
 
-            if normalize:
-                pc_unrot = (pc_unrot - pc_unrot.mean()) / pc_unrot.std()
-                pc_rot   = (pc_rot - pc_rot.mean()) / pc_rot.std()
-
-            time_vals = pc_unrot.time.values
-
-            if source_name == 'observed':
-                color, lw, zorder = 'green', 2.0, 10
-                label_unrot = 'Observed (standard)'
-                label_rot   = 'Observed (rotated)'
-            elif source_name == 'multi model mean':
-                color, lw, zorder = 'black', 2.0, 9
-                label_unrot = 'Multi-model mean (standard)'
-                label_rot   = 'Multi-model mean (rotated)'
-            else:
-                color, lw, zorder = 'grey', 0.6, 1
-                if source_name == individual_sources[0]:
-                    label_unrot = 'Individual models (standard)'
-                    label_rot   = 'Individual models (rotated)'
-                else:
-                    label_unrot = ''
-                    label_rot   = ''
-
-            ax.plot(time_vals, pc_unrot, color=color, linewidth=lw, linestyle='-', alpha=0.8 if source_name in PRIORITY else 0.4, zorder=zorder, label=label_unrot)
-            ax.plot(time_vals, pc_rot, color=color, linewidth=lw, linestyle='--', alpha=0.8 if source_name in PRIORITY else 0.4, zorder=zorder, label=label_rot)
-
-        ax.axhline(0, color='grey', linewidth=0.5)
         suffix = ' (normalised)' if normalize else ''
-        var_unrot = dual_eof_results[f'observed__unrotated']['variance_fractions'].sel(mode=mode_idx).item() * 100
-        var_rot   = dual_eof_results[f'observed__rotated']['variance_fractions'].sel(mode=mode_idx).item() * 100
-        ax.set_title(f'{subplot_letter}) PC {mode_idx + 1} — Obs. var: {var_unrot:.1f}% (std) / {var_rot:.1f}% (rot)', fontweight='bold', fontsize=11)
-        ax.set_ylabel(f'Amplitude{suffix}', fontsize=9)
-        ax.set_xlim(START_YEAR, END_YEAR)
-        ax.grid(True, linestyle='--', alpha=0.4)
-
+        ax_full.set_title(f'{letter_l}) PC {mode_idx + 1} (1850-{END_YEAR})', fontweight='bold', fontsize=11, pad=22)
+        if var_str_l:
+            ax_full.text(0.5, 1.02, var_str_l, transform=ax_full.transAxes, ha='center', va='bottom', fontsize=10, fontweight='normal')
+        ax_full.set_ylabel(f'Amplitude{suffix}', fontsize=10)
+        ax_full.set_xlim(1850, END_YEAR)
+        ax_full.grid(True, linestyle='--', alpha=0.4)
         if mode_idx == 0:
-            legend_handles = [Line2D([0], [0], color='green', lw=2, ls='-', label='Observed (standard)'),
-                              Line2D([0], [0], color='green', lw=2, ls='--', label='Observed (rotated)'),
-                              Line2D([0], [0], color='black', lw=2, ls='-', label='Multi-model mean (standard)'),
-                              Line2D([0], [0], color='black', lw=2, ls='--', label='Multi-model mean (rotated)'),
-                              Line2D([0], [0], color='grey', lw=1, ls='-', alpha=0.6, label='Models (standard)'),
-                              Line2D([0], [0], color='grey', lw=1, ls='--', alpha=0.6, label='Models (rotated)')]
-            ax.legend(handles=legend_handles, loc='lower right', fontsize=8, ncol=3)
+            handles, labels = ax_full.get_legend_handles_labels()
+            handles.append(Patch(facecolor='green', alpha=0.10, label=f'Observed period ({START_YEAR}-{END_YEAR})'))
+            labels.append(f'Observed period ({START_YEAR}-{END_YEAR})')
+            ax_full.legend(handles, labels, loc='lower right', fontsize=8, ncol=2)
 
-    axes[-1].set_xlabel('Year', fontsize=11)
+        #right column altimetry era (1993-2024)
+        first_right = right_individuals[0] if right_individuals else None
+        for s in right_order:
+            _plot_source(ax_obs, dual_eof_results, s, mode_idx, first_right)
+        ax_obs.axhline(0, color='grey', lw=0.5)
 
-    eof_label = 'Rotated EOF' if USE_ROTATED_EOF else 'EOF'
+        try:
+            v_u = dual_eof_results['observed__unrotated']['variance_fractions'].sel(mode=mode_idx).item() * 100
+            v_r = dual_eof_results['observed__rotated']['variance_fractions'].sel(mode=mode_idx).item() * 100
+            var_str_r = f'Standard EV: {v_u:.1f}% | rotated EV: {v_r:.1f}%'
+        except KeyError:
+            var_str_r = ''
+
+        ax_obs.set_title(f'{letter_r}) PC {mode_idx + 1} ({START_YEAR}-{END_YEAR})', fontweight='bold', fontsize=11, pad=22)
+        if var_str_r:
+            ax_obs.text(0.5, 1.02, var_str_r, transform=ax_obs.transAxes, ha='center', va='bottom', fontsize=10, fontweight='normal')
+        ax_obs.set_xlim(START_YEAR, END_YEAR)
+        ax_obs.grid(True, linestyle='--', alpha=0.4)
+        ax_obs.yaxis.tick_right()
+        ax_obs.yaxis.set_label_position('right')
+        ax_obs.set_ylabel(f'Amplitude{suffix}', fontsize=10)
+        ax_obs.tick_params(axis='y', length=4, which='both')
+        ax_obs.spines['left'].set_visible(True)
+        for spine in ax_obs.spines.values():
+            spine.set_edgecolor('green')
+            spine.set_linewidth(2.0)
+        if mode_idx == 0:
+            ax_obs.legend(loc='lower right', fontsize=8, ncol=2)
+
+    axes[-1, 0].set_xlabel('Year', fontsize=11)
+    axes[-1, 1].set_xlabel('Year', fontsize=11)
+
     norm_label = ' (normalised)' if normalize else ''
-    fig.suptitle(f'Principal component time series: standard vs rotated{norm_label}', fontsize=14, fontweight='bold', y=0.98)
+    fig.suptitle(f'Principal component time series: standard vs rotated{norm_label}', fontsize=16, fontweight='bold', y=0.94)
+    plt.tight_layout(rect=(0, 0, 1, 0.95))
+    plt.subplots_adjust(hspace=0.55)
 
-    plt.tight_layout(rect=(0, 0, 1, 0.96))
-
-    norm_tag    = '_normalised' if normalize else ''
-    output_path = os.path.join(fig_dir, f'pc_timeseries{norm_tag}.png')
+    output_path = os.path.join(fig_dir, f'pc_timeseries{norm_tag if (norm_tag := ("_normalised" if normalize else "")) else ""}.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved: {output_path}")
@@ -2291,7 +2349,7 @@ def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, m
 
     #color list climate indices
     _index_palette = ['#e41a1c', '#377eb8', '#ff7f00', '#984ea3', '#a65628', '#f781bf', "#dee602", "#00eeff", "#0059ff", "#ff00ff"]
-    index_colors = {name: _index_palette[i % len(_index_palette)] for i, name in enumerate(index_names)}
+    index_colors   = {name: _index_palette[i % len(_index_palette)] for i, name in enumerate(index_names)}
 
     fig, ax = plt.subplots(figsize=(10, 10))
 
@@ -2349,7 +2407,7 @@ def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, m
         alphas    = alpha_min + (1.0 - alpha_min) * year_norm
         rgba      = np.array([mcolors.to_rgba(base_color, alpha=a) for a in alphas])
 
-        edge = 'none' if source_name not in PRIORITY else 'k'
+        edge    = 'none' if source_name not in PRIORITY else 'k'
         edge_lw = 0.0 if source_name not in PRIORITY else 0.3
 
         ax.scatter(pc_x, pc_y, c=rgba, marker=marker, s=s, edgecolor=edge, linewidth=edge_lw, zorder=zorder, label=label)
@@ -2421,7 +2479,7 @@ def plot_correlation_biplot(all_eof_results, all_correlation_results, fig_dir, m
     ax.legend(handles=index_handles, loc='lower left', fontsize=9, title='Climate indices (observed)', title_fontproperties={'weight': 'bold'})
         
     plt.tight_layout()
-    norm_tag = '_normalised' if normalize else ''
+    norm_tag    = '_normalised' if normalize else ''
     output_path = os.path.join(fig_dir, f'correlation_biplot_pc{mode_x+1}_vs_pc{mode_y+1}{norm_tag}.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
@@ -2613,54 +2671,59 @@ def plot_scatter_comparison(cmip_results, sliding_results, fig_dir, plot_var=Non
 
     if plot_var == 'trend':
         model_data = cmip_results['model_mean_trend']
-        obs_data = sliding_results['odsl_mm_yr_regridded']
+        obs_data   = sliding_results['odsl_mm_yr_regridded']
     elif plot_var == 'variability':
         model_data = cmip_results['model_mean_variability']
-        obs_data = sliding_results['odsl_var_obs_regridded']
+        obs_data   = sliding_results['odsl_var_obs_regridded']
     elif plot_var == 'ODSL':
         model_data = cmip_results['model_mean_odsl']
-        obs_data = sliding_results['odsl_obs_regridded']
+        obs_data   = sliding_results['odsl_obs_regridded']
     else:
         raise ValueError(f"Unknown PLOT_VARIABLE: {plot_var}")
 
     #flatten
-    obs_flat = obs_data.values.flatten()
+    obs_flat   = obs_data.values.flatten()
     model_flat = model_data.values.flatten()
 
     #mask
     valid_mask = ~np.isnan(obs_flat) & ~np.isnan(model_flat)
-    x_points = model_flat[valid_mask]
-    y_points = obs_flat[valid_mask]
+    x_points   = model_flat[valid_mask]
+    y_points   = obs_flat[valid_mask]
 
     #statistics
     region_mask = create_region_mask(model_data, EXTENT)
-    stats_w = calculate_weighted_stats(model_data, region_mask, data_y=obs_data)
-    bias = stats_w['bias'] 
+    stats_w     = calculate_weighted_stats(model_data, region_mask, data_y=obs_data)
+
+    bias                      = stats_w['bias'] 
     pct_5_model, pct_95_model = np.percentile(x_points, [5, 95])
-    pct_5_obs, pct_95_obs = np.percentile(y_points, [5, 95])
-    range_ratio = (pct_95_model - pct_5_model) / (pct_95_obs - pct_5_obs)
-    median_model = np.median(x_points)
-    median_obs = np.median(y_points)
+    pct_5_obs, pct_95_obs     = np.percentile(y_points, [5, 95])
+    range_ratio               = (pct_95_model - pct_5_model) / (pct_95_obs - pct_5_obs)
+    median_model              = np.median(x_points)
+    median_obs                = np.median(y_points)
 
     #linear regression
     slope, intercept, r_value, _, _ = stats.linregress(x_points, y_points)
-    r_squared = r_value**2 # type: ignore
-    normalized_std_dev = stats_w['std_x'] / stats_w['std_y']
-    num_points = len(x_points)
+    r_squared                       = r_value**2 # type: ignore
+    normalized_std_dev              = stats_w['std_x'] / stats_w['std_y']
+    num_points                      = len(x_points)
 
     #plotting
     fig, ax = plt.subplots(figsize=(9, 8))
 
-    abs_max = max(abs(np.nanmin(x_points)), abs(np.nanmax(x_points)), abs(np.nanmin(y_points)), abs(np.nanmax(y_points)))
-    lims = (-abs_max * 1.1, abs_max * 1.1)
+    if plot_var == 'variability':
+        data_max = max(np.nanmax(x_points), np.nanmax(y_points))
+        lims     = (0, data_max * 1.1)
+    else:
+        abs_max = max(abs(np.nanmin(x_points)), abs(np.nanmax(x_points)), abs(np.nanmin(y_points)), abs(np.nanmax(y_points)))
+        lims    = (-abs_max * 1.1, abs_max * 1.1)
 
     #hexbin with logarithmic scale
     hb = ax.hexbin(x_points, y_points, gridsize=100, cmap='inferno', norm=LogNorm(), extent=(lims[0], lims[1], lims[0], lims[1]))
     
     #colorbar
     divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.1)
-    cb = fig.colorbar(hb, cax=cax)
+    cax     = divider.append_axes("right", size="5%", pad=0.1)
+    cb      = fig.colorbar(hb, cax=cax)
     cb.set_label('Number of grid cells')
 
     #axes limits
@@ -2673,13 +2736,12 @@ def plot_scatter_comparison(cmip_results, sliding_results, fig_dir, plot_var=Non
 
     #statistics
     stats_text = (f"N = {num_points}\n"
-                  r"R$^2$ = {r_squared:.2f}\n"
+                  fr"R$^2$ = {r_squared:.2f}"f"\n"
                   f"Bias = {bias:.2f} {cfg['units']}\n"
                   f"Std ratio (mod/obs) = {normalized_std_dev:.2f}\n"
                   f"Range ratio (5-95%) = {range_ratio:.2f}\n"
                   f"Median obs = {median_obs:.2f}\n"
-                  f"Median model = {median_model:.2f}"
-                 )
+                  f"Median model = {median_model:.2f}")
 
     #text box
     ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.8))
@@ -2708,67 +2770,75 @@ def plot_scatter_comparison_individual_models(cmip_results, sliding_results, fig
 
     if plot_var == 'trend':
         all_model_data = cmip_results['model_trend']
-        obs_data = sliding_results['odsl_mm_yr_regridded']
+        obs_data       = sliding_results['odsl_mm_yr_regridded']
     elif plot_var == 'variability':
         all_model_data = cmip_results['model_variability']
-        obs_data = sliding_results['odsl_var_obs_regridded']
+        obs_data       = sliding_results['odsl_var_obs_regridded']
     elif plot_var == 'ODSL':
         all_model_data = cmip_results['model_odsl_mean']
-        obs_data = sliding_results['odsl_obs_regridded']
+        obs_data       = sliding_results['odsl_obs_regridded']
     else:
         raise ValueError(f"Unknown PLOT_VARIABLE: {plot_var}")
 
     model_names = all_model_data.model.values
-    num_models = len(model_names)
-
-    #flatten
-    all_model_flat = all_model_data.values.flatten()
-    obs_flat_for_lims = obs_data.values.flatten()
-    all_points = np.concatenate([all_model_flat, obs_flat_for_lims])
-
-    #axes limits
-    plot_max = max(abs(np.nanmin(all_points)), abs(np.nanmax(all_points)))
-    lims = [-plot_max * 1.1, plot_max * 1.1]
+    num_models  = len(model_names)
 
     #subplot grid
-    ncols = 4
-    nrows = (num_models + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 5, nrows * 4.5), sharex=True, sharey=True)
-    axes = axes.flatten()
+    ncols     = 4
+    nrows     = (num_models + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols * 5, nrows * 4.5))
+    axes      = axes.flatten()
 
+    hb_list = []
     hb = None
     #loop
     for i, model_name in enumerate(model_names):
-        ax = axes[i]
+        ax                = axes[i]
         model_data_single = all_model_data.sel(model=model_name)
 
         #1D data arrays
-        obs_flat = obs_data.values.flatten()
+        obs_flat   = obs_data.values.flatten()
         model_flat = model_data_single.values.flatten()
         valid_mask = ~np.isnan(obs_flat) & ~np.isnan(model_flat)
-        x_points = model_flat[valid_mask]
-        y_points = obs_flat[valid_mask]
+        x_points   = model_flat[valid_mask]
+        y_points   = obs_flat[valid_mask]
+
+        #axis limits
+        if plot_var == 'variability':
+            data_max = max(np.nanmax(x_points), np.nanmax(y_points))
+            lims = [0, data_max * 1.1]
+        else:
+            abs_max = max(abs(np.nanmin(x_points)), abs(np.nanmax(x_points)), abs(np.nanmin(y_points)), abs(np.nanmax(y_points)))
+            lims    = [-abs_max * 1.1, abs_max * 1.1]
 
         #statistics
         region_mask = create_region_mask(model_data_single, EXTENT)
-        stats_w = calculate_weighted_stats(model_data_single, region_mask, data_y=obs_data)
-        pcc_w = stats_w['pcc']
-        rmse_w = stats_w['rmse']
+        stats_w     = calculate_weighted_stats(model_data_single, region_mask, data_y=obs_data)
+        pcc_w       = stats_w['pcc']
+        rmse_w      = stats_w['rmse']
 
         #linear regression
         slope, intercept, r_value, _, _ = stats.linregress(x_points, y_points)
-        r_squared = r_value**2 # type: ignore
-        normalized_std_dev = stats_w['std_x'] / stats_w['std_y']
+        r_squared                       = r_value**2 # type: ignore
+        normalized_std_dev              = stats_w['std_x'] / stats_w['std_y']
 
         #hexbin
-        hb = ax.hexbin(x_points, y_points, gridsize=100, cmap='inferno', norm=LogNorm(), extent=[lims[0], lims[1], lims[0], lims[1]])
+        hb = ax.hexbin(x_points, y_points, gridsize=100, cmap='inferno', extent=[lims[0], lims[1], lims[0], lims[1]])
+        hb_list.append(hb)
 
         #lines
         ax.plot(lims, lims, 'k--', linewidth=1, alpha=0.6)
         ax.plot(x_points, slope * x_points + intercept, 'r-', linewidth=2, alpha=0.9)
 
+        ax.set_xlim(lims)
+        ax.set_ylim(lims)
+
         #statistics box
-        stats_text = (f"PCC = {pcc_w:.2f}\n" f"RMSE = {rmse_w:.2f}\n" f"R² = {r_squared:.2f}\n" f"Std ratio = {normalized_std_dev:.2f}\n" f"y = {slope:.2f}x + {intercept:.2f}")
+        stats_text = (f"PCC = {pcc_w:.2f}\n" 
+                      f"RMSE = {rmse_w:.2f}\n" 
+                      fr"R$^2$ = {r_squared:.2f}"f"\n" 
+                      f"Std ratio = {normalized_std_dev:.2f}\n" 
+                      f"y = {slope:.2f}x + {intercept:.2f}")
         ax.text(0.05, 0.92, stats_text, transform=ax.transAxes, fontsize=8, verticalalignment='top', bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.7))
 
         ax.text(0.5, 0.97, model_name, transform=ax.transAxes, fontsize=11, fontweight='bold', ha='center', va='top')
@@ -2784,14 +2854,22 @@ def plot_scatter_comparison_individual_models(cmip_results, sliding_results, fig
     fig.supylabel(f"Observed ODSL {cfg['name']} ({cfg['units']})", fontsize=14, x=0.02)
     fig.suptitle(f"Grid-cell comparison for individual CMIP models vs. observations ({cfg['name']})", fontsize=16, fontweight='bold', y=0.94)
 
-    fig.subplots_adjust(left=0.05, bottom=0.07, right=0.92, top=0.92, wspace=0.02, hspace=0.1)
+    fig.subplots_adjust(left=0.05, bottom=0.07, right=0.92, top=0.92, wspace=0.05, hspace=0.15)
+
+    #global color limits
+    max_count = max(h.get_array().max() for h in hb_list)
+    shared_norm = LogNorm(vmin=1, vmax=max_count)
+    for h in hb_list:
+        h.set_norm(shared_norm)
 
     #shared colorbar
     pos_top_right = axes[ncols - 1].get_position()
-    pos_bottom = axes[num_models - 1].get_position()
+    pos_bottom    = axes[num_models - 1].get_position()
     if hb:
         cbar_ax = fig.add_axes((pos_top_right.x1 + 0.015, pos_bottom.y0, 0.02, pos_top_right.y1 - pos_bottom.y0))
-        fig.colorbar(hb, cax=cbar_ax, label='Number of grid cells')
+        cbar = fig.colorbar(hb, cax=cbar_ax)
+        cbar.ax.tick_params(labelsize=14)
+        cbar.set_label('Number of grid cells', fontsize=14)
 
     plt.savefig(os.path.join(fig_dir, f'scatter_comparison_individual_models_{cfg["name"]}.png'), dpi=300, bbox_inches='tight')
     #plt.show()
@@ -2807,31 +2885,36 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir, plot_va
     cfg = PLOT_CONFIG[plot_var]
 
     #data
-    pcc_data = incrementing_window_results['pcc'].sel(variable=plot_var)
+    pcc_data  = incrementing_window_results['pcc'].sel(variable=plot_var)
     rmse_data = incrementing_window_results['rmse'].sel(variable=plot_var)
 
     end_years = pcc_data.end_year.values
-    sources = pcc_data.source.values
+    sources   = pcc_data.source.values
 
     #sign agreement only if available and relevant
-    has_sign_agreement = 'sign_agreement' in incrementing_window_results
+    has_sign_agreement     = 'sign_agreement' in incrementing_window_results
     include_sign_agreement = has_sign_agreement and plot_var in ['trend', 'ODSL']
-    n_subplots = 3 if include_sign_agreement else 2
+    n_subplots             = 3 if include_sign_agreement else 2
+
+    ax2_inset:    Any = None
+    pi_end_years: Any = None
+    pi_rmse_mean: Any = None
+    pi_rmse_std:  Any = None
 
     #plotting
     subplot_height = 3.5
-    fig_height = n_subplots * subplot_height
-    fig, axes = plt.subplots(nrows=n_subplots, ncols=1, figsize=(12, fig_height), sharex=True)
+    fig_height     = n_subplots * subplot_height
+    fig, axes      = plt.subplots(nrows=n_subplots, ncols=1, figsize=(12, fig_height), sharex=True)
     
-    all_pcc_vals = []
+    all_pcc_vals  = []
     all_rmse_vals = []
 
     #PCC
-    ax1 = axes[0]
+    ax1            = axes[0]
     is_first_model = True
     for source in sources:
         if source != 'multi model mean':
-            vals = pcc_data.sel(source=source).values
+            vals   = pcc_data.sel(source=source).values
             all_pcc_vals.extend(vals[~np.isnan(vals)])
             if is_first_model:
                 ax1.plot(end_years, vals, color='lightgrey', linewidth=1, label='Individual models')
@@ -2848,21 +2931,35 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir, plot_va
     ax1.grid(True, linestyle='--', alpha=0.6)
 
     #RMSE
-    ax2 = axes[1]
+    ax2                = axes[1]
+    include_rmse_inset = (plot_var == 'trend')
+    if include_rmse_inset:
+        ax2_inset = ax2.inset_axes([0.25, 0.27, 0.73, 0.7])
+        ax2_inset.grid(True, linestyle='--', alpha=0.6)
+        ax2_inset.tick_params(axis='both', which='major', labelsize=8)
+
     is_first_model = True
     for source in sources:
         if source != 'multi model mean':
-            vals = rmse_data.sel(source=source).values
+            vals   = rmse_data.sel(source=source).values
             all_rmse_vals.extend(vals[~np.isnan(vals)])
+
             if is_first_model:
                 ax2.plot(end_years, vals, color='lightgrey', linewidth=1, label='Individual models')
+
                 is_first_model = False
             else:
                 ax2.plot(end_years, vals, color='lightgrey', linewidth=1)
+
+            if include_rmse_inset:
+                ax2_inset.plot(end_years, vals, color='lightgrey', linewidth=1)
     
     mmm_rmse = rmse_data.sel(source='multi model mean').values
     all_rmse_vals.extend(mmm_rmse[~np.isnan(mmm_rmse)])
     ax2.plot(end_years, mmm_rmse, color='black', linewidth=2.5, label='Multi-model mean')
+    
+    if include_rmse_inset:
+        ax2_inset.plot(end_years, mmm_rmse, color='black', linewidth=2.5)
     
     ax2.set_title('RMSE vs. time window', fontweight='bold')
     ax2.set_ylabel(f'RMSE ({cfg["units"]})')
@@ -2870,19 +2967,19 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir, plot_va
 
     #picontrol
     if picontrol_incrementing_results is not None:
-        pi_pcc_data = picontrol_incrementing_results['pcc'].sel(variable=plot_var)
+        pi_pcc_data  = picontrol_incrementing_results['pcc'].sel(variable=plot_var)
         pi_rmse_data = picontrol_incrementing_results['rmse'].sel(variable=plot_var)
         pi_end_years = picontrol_incrementing_results.end_year.values
         
         #multi-model mean \pm std across individual models
-        pi_sources = [s for s in pi_pcc_data.source.values if s != 'multi model mean']
-        pi_pcc_individuals = pi_pcc_data.sel(source=pi_sources)
+        pi_sources          = [s for s in pi_pcc_data.source.values if s != 'multi model mean']
+        pi_pcc_individuals  = pi_pcc_data.sel(source=pi_sources)
         pi_rmse_individuals = pi_rmse_data.sel(source=pi_sources)
         
-        pi_pcc_mean = pi_pcc_individuals.mean(dim='source').values
-        pi_pcc_std = pi_pcc_individuals.std(dim='source').values
+        pi_pcc_mean  = pi_pcc_individuals.mean(dim='source').values
+        pi_pcc_std   = pi_pcc_individuals.std(dim='source').values
         pi_rmse_mean = pi_rmse_individuals.mean(dim='source').values
-        pi_rmse_std = pi_rmse_individuals.std(dim='source').values
+        pi_rmse_std  = pi_rmse_individuals.std(dim='source').values
         
         #y-axis scaling
         all_pcc_vals.extend((pi_pcc_mean - 2*pi_pcc_std).tolist())
@@ -2898,32 +2995,60 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir, plot_va
         ax2.fill_between(pi_end_years, np.maximum(0, pi_rmse_mean - 2*pi_rmse_std), pi_rmse_mean + 2*pi_rmse_std, color='lightblue', alpha=0.4, zorder=0, label=r'piControl $\pm$2$\sigma$')
         ax2.plot(pi_end_years, pi_rmse_mean, color='steelblue', linestyle='--', linewidth=1.5, alpha=0.7, label='piControl multi-model mean')
 
+        if include_rmse_inset:
+            ax2_inset.fill_between(pi_end_years, np.maximum(0, pi_rmse_mean - 2*pi_rmse_std), pi_rmse_mean + 2*pi_rmse_std, color='lightblue', alpha=0.4, zorder=0)
+            ax2_inset.plot(pi_end_years, pi_rmse_mean, color='steelblue', linestyle='--', linewidth=1.5, alpha=0.7)
+
+    ax1.set_xlim(1993, 2024)
+
     #dynamic y-axis scaling 
     pcc_min, pcc_max = np.nanmin(all_pcc_vals), np.nanmax(all_pcc_vals)
-    pcc_range = pcc_max - pcc_min
-    pcc_center = (pcc_max + pcc_min) / 2
+    pcc_range        = pcc_max - pcc_min
+    pcc_center       = (pcc_max + pcc_min) / 2
     ax1.set_ylim(pcc_center - pcc_range * 0.55, pcc_center + pcc_range * 0.55)
 
     rmse_min, rmse_max = np.nanmin(all_rmse_vals), np.nanmax(all_rmse_vals)
-    rmse_range = rmse_max - rmse_min
+    rmse_range         = rmse_max - rmse_min
     ax2.set_ylim(max(0, rmse_min - rmse_range * 0.05), rmse_max + rmse_range * 0.05)
+
+    if include_rmse_inset:
+        ax2_inset.set_xlim(2000, 2024)
+        inset_mask      = (end_years >= 2000) & (end_years <= 2024)
+        inset_rmse_vals = []
+
+        for source in sources:
+            vals        = rmse_data.sel(source=source).values
+            masked_vals = vals[inset_mask]
+            inset_rmse_vals.extend(masked_vals[~np.isnan(masked_vals)].tolist())
+
+        if picontrol_incrementing_results is not None:
+            pi_inset_mask = (pi_end_years >= 2000) & (pi_end_years <= 2024)
+            inset_rmse_vals.extend(np.maximum(0, pi_rmse_mean[pi_inset_mask] - 2*pi_rmse_std[pi_inset_mask]).tolist())
+            inset_rmse_vals.extend((pi_rmse_mean[pi_inset_mask] + 2*pi_rmse_std[pi_inset_mask]).tolist())
+
+        if inset_rmse_vals:
+            inset_min, inset_max = np.nanmin(inset_rmse_vals), np.nanmax(inset_rmse_vals)
+            inset_range          = inset_max - inset_min
+            ax2_inset.set_ylim(max(0, inset_min - inset_range * 0.05), inset_max + inset_range * 0.05)
 
     #legend
     if plot_var == 'variability':
         ax1.legend(loc='best')
+    elif include_rmse_inset:
+        ax2.legend(loc='upper right')
     else:
         ax2.legend(loc='best')
 
     #sign agreement
     if include_sign_agreement:
-        sign_data = incrementing_window_results['sign_agreement'].sel(variable=plot_var)
-        ax3 = axes[2]
-        all_sign_vals = []
+        sign_data  = incrementing_window_results['sign_agreement'].sel(variable=plot_var)
+        ax3        = axes[2]
 
+        all_sign_vals  = []
         is_first_model = True
         for source in sources:
             if source != 'multi model mean':
-                vals = sign_data.sel(source=source).values * 100
+                vals   = sign_data.sel(source=source).values * 100
                 all_sign_vals.extend(vals[~np.isnan(vals)])
                 if is_first_model:
                     ax3.plot(end_years, vals, color='lightgrey', linewidth=1)
@@ -2937,12 +3062,12 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir, plot_va
 
         #piControl sign agreement
         if picontrol_incrementing_results is not None and 'sign_agreement' in picontrol_incrementing_results:
-            pi_sign_data = picontrol_incrementing_results['sign_agreement'].sel(variable=plot_var)
-            pi_end_years_sign = picontrol_incrementing_results.end_year.values
-            pi_sources_sign = [s for s in pi_sign_data.source.values if s != 'multi model mean']
+            pi_sign_data        = picontrol_incrementing_results['sign_agreement'].sel(variable=plot_var)
+            pi_end_years_sign   = picontrol_incrementing_results.end_year.values
+            pi_sources_sign     = [s for s in pi_sign_data.source.values if s != 'multi model mean']
             pi_sign_individuals = pi_sign_data.sel(source=pi_sources_sign)
-            pi_sign_mean = pi_sign_individuals.mean(dim='source').values * 100
-            pi_sign_std = pi_sign_individuals.std(dim='source').values * 100
+            pi_sign_mean        = pi_sign_individuals.mean(dim='source').values * 100
+            pi_sign_std         = pi_sign_individuals.std(dim='source').values * 100
             
             all_sign_vals.extend((pi_sign_mean - 2*pi_sign_std).tolist())
             all_sign_vals.extend((pi_sign_mean + 2*pi_sign_std).tolist())
@@ -2951,8 +3076,8 @@ def plot_incrementing_window_skill(incrementing_window_results, fig_dir, plot_va
             ax3.plot(pi_end_years_sign, pi_sign_mean, color='steelblue', linestyle='--', linewidth=1.5, alpha=0.7)
     
         sign_min, sign_max = np.nanmin(all_sign_vals), np.nanmax(all_sign_vals)
-        sign_range = sign_max - sign_min
-        sign_center = (sign_max + sign_min) / 2
+        sign_range         = sign_max - sign_min
+        sign_center        = (sign_max + sign_min) / 2
         ax3.set_ylim(sign_center - sign_range * 0.55, sign_center + sign_range * 0.55)
 
         ax3.set_title('Sign agreement vs. time window', fontweight='bold')
@@ -2996,11 +3121,11 @@ def plot_smoothing_sensitivity(smoothing_results, fig_dir):
 
 
 
-    titles = ['a) No Smoothing', 'b) $\\sigma_{x,y}$ = 3', 'c) $\\sigma_{x,y}$ = 6', 'd) $\\sigma_{x,y}$ = 9']
+    titles = [fr'$\bf{{a)\ No\ Smoothing}}$', fr'$\bf{{b)\ \sigma_{{x,y}} = 3}}$', fr'$\bf{{c)\ \sigma_{{x,y}} = 6}}$', fr'$\bf{{d)\ \sigma_{{x,y}} = 9}}$']
 
     #stats compared to no smoothing
     reference_data = smoothing_results.sel(sigma=0)
-    region_mask = create_region_mask(reference_data, EXTENT)
+    region_mask    = create_region_mask(reference_data, EXTENT)
     
     mesh = None
     for i, (ax, sigma, title) in enumerate(zip(axes, sigmas, titles)):
@@ -3014,11 +3139,12 @@ def plot_smoothing_sensitivity(smoothing_results, fig_dir):
         #statistics
         if sigma > 0:
 
-            stats = calculate_weighted_stats(data_to_plot, region_mask, data_y=reference_data)
+            stats    = calculate_weighted_stats(data_to_plot, region_mask, data_y=reference_data)
             subtitle = f"\nPCC: {stats['pcc']:.2f} | RMSE: {stats['rmse']:.2f} mm/yr"
             ax.set_title(title + subtitle, fontsize=11)
         else:
-            ax.set_title(title, fontsize=11)
+            subtitle = f'\n'
+            ax.set_title(title + subtitle, fontsize=11)
 
     fig.suptitle('Sensitivity of altimetry trend to Gaussian smoothing', fontsize=18, fontweight='bold', y=0.85)
 
@@ -3175,10 +3301,10 @@ def plot_eof_maps_comparison(eof_results, fig_dir, num_modes=3):
     obs_subset = obs_eofs.isel(mode=slice(0, num_modes))
     mmm_subset = mmm_eofs.isel(mode=slice(0, num_modes))
 
-    val_obs = abs(obs_subset).quantile(0.99).item()
+    val_obs        = abs(obs_subset).quantile(0.99).item()
     global_lim_obs = np.ceil(val_obs * 100) / 100.0
 
-    val_mmm = abs(mmm_subset).quantile(0.99).item()
+    val_mmm        = abs(mmm_subset).quantile(0.99).item()
     global_lim_mmm = np.ceil(val_mmm * 100) / 100.0
 
     im_obs = None
@@ -3199,8 +3325,8 @@ def plot_eof_maps_comparison(eof_results, fig_dir, num_modes=3):
         combined_mask = map_mmm.notnull() & map_obs.notnull()
         
         #weighted Stats
-        stats = calculate_weighted_stats(map_mmm, combined_mask, data_y=map_obs)
-        pcc = stats['pcc']
+        stats    = calculate_weighted_stats(map_mmm, combined_mask, data_y=map_obs)
+        pcc      = stats['pcc']
         sign_agr = stats['sign_agreement']
 
         #plot observed left column
@@ -3210,9 +3336,9 @@ def plot_eof_maps_comparison(eof_results, fig_dir, num_modes=3):
         #observed title
         var_txt = f"{obs_vars.sel(mode=mode_idx).item():.1f}%"
         if 'variance_fractions_error' in obs_res:
-            err = obs_res['variance_fractions_error'].sel(mode=mode_idx).item() * 100
+            err      = obs_res['variance_fractions_error'].sel(mode=mode_idx).item() * 100
             var_txt += f" ± {err:.1f}%"
-        ax_obs.set_title(f"Observed mode {mode_num}\nExp. Var: {var_txt}", fontsize=11, fontweight='bold')
+        ax_obs.set_title(fr'$\bf{{Observed\ mode\ {mode_num}}}$'f'\nExp. Var: {var_txt}', fontsize=11)
 
         #plot multi-model mean right column
         add_map_features(ax_mmm, EXTENT, is_left=False, is_bottom=(i == num_modes-1))
@@ -3224,7 +3350,7 @@ def plot_eof_maps_comparison(eof_results, fig_dir, num_modes=3):
             err = mmm_res['variance_fractions_error'].sel(mode=mode_idx).item() * 100
             var_txt_m += f" ± {err:.1f}%"
         
-        ax_mmm.set_title(f"PCC: {pcc:.2f} | Sign agreement: {sign_agr:.0%}\nMulti-model mean mode {mode_num}\nExp. var: {var_txt_m}", fontsize=11, fontweight='bold')
+        ax_mmm.set_title(f'PCC: {pcc:.2f} | Sign agreement: {sign_agr:.0%}\n'fr'$\bf{{Multi-model\ mean\ mode\ {mode_num}}}$'f'\nExp. var: {var_txt_m}', fontsize=11)
 
     scalar_fmt = mticker.ScalarFormatter(useMathText=True)
     scalar_fmt.set_powerlimits((-1, 1))
@@ -3327,10 +3453,10 @@ def plot_eof_monte_carlo_significance(eof_results, fig_dir):
         ax.set_ylabel('Variance explained (%)', fontsize=12)
         
         title_name = 'Multi-model mean' if name == 'multi model mean' else name.title()
-        ax.set_title(f'{subplot_label}) {title_name}\n({is_sig_95.sum()} significant at 95%)', fontsize=13, fontweight='bold')        
+        ax.set_title(fr'$\bf{{{subplot_label})\ {title_name}}}$'f'\n({is_sig_95.sum()} significant at 95%)', fontsize=13)        
         
         ax.set_xticks(modes)
-        ax.grid(True, alpha=0.5, linestyle='--')
+        ax.grid(True, alpha=0.5, axis='y', linestyle='--')
         
         #alpha value
         if 'alpha' in result.attrs:
@@ -3402,9 +3528,9 @@ def plot_obs_vs_mmm_significance(sources_with_mc, fig_dir):
         ax.set_xlabel('EOF mode', fontsize=12)
         ax.set_ylabel('Variance explained (%)', fontsize=12)
         display_name = 'Multi-model mean' if source_name == 'multi model mean' else source_name.title()
-        ax.set_title(f'{subplot_letter}) {display_name}\n({is_sig_95.sum()} significant at 95%)', fontsize=11)        
+        ax.set_title(fr'$\bf{{{subplot_letter})\ {display_name}}}$'f'\n({is_sig_95.sum()} significant at 95%)', fontsize=12)        
         ax.set_xticks(modes)
-        ax.grid(True, alpha=0.5, linestyle='--')
+        ax.grid(True, alpha=0.5, axis='y', linestyle='--')
         ax.legend(loc='upper right', fontsize=9)
 
     eof_label = 'Rotated EOF' if USE_ROTATED_EOF else 'Standard EOF'
@@ -3513,7 +3639,7 @@ def plot_3d_odsl_cover_art(dataset, fig_dir, variable='odsl'):
         
         print(f"Cropped from {img.size} to {img_cropped.size}")
 
-def plot_dual_eof_comparison(dual_eof_results, fig_dir, num_modes_to_plot=10, source='observed'):
+def plot_dual_eof_comparison(dual_eof_results, fig_dir, num_modes_to_plot=5, source='observed'):
     """Standard vs rotated EOF variance."""
 
     os.makedirs(fig_dir, exist_ok=True)
@@ -3521,13 +3647,13 @@ def plot_dual_eof_comparison(dual_eof_results, fig_dir, num_modes_to_plot=10, so
     #sources
     all_sources = sorted(set(k.rsplit('__', 1)[0] for k in dual_eof_results.keys()))
     if source in all_sources:
-        ref_key = source
+        ref_key    = source
         model_keys = [k for k in all_sources if k != source]
-        has_ref = True
+        has_ref    = True
     else:
-        ref_key = None
+        ref_key    = None
         model_keys = all_sources
-        has_ref = False
+        has_ref    = False
 
     if not model_keys:
         print("Not enough data to perform multimodel comparison.")
@@ -3536,12 +3662,12 @@ def plot_dual_eof_comparison(dual_eof_results, fig_dir, num_modes_to_plot=10, so
     #data helper
     def get_variance_curve(key, eof_type):
         try:
-            ds = dual_eof_results[f'{key}__{eof_type}']
+            ds       = dual_eof_results[f'{key}__{eof_type}']
             var_data = ds['variance_fractions'].values * 100
             if len(var_data) >= num_modes_to_plot:
                 return var_data[:num_modes_to_plot]
             else:
-                padded = np.full(num_modes_to_plot, np.nan)
+                padded                 = np.full(num_modes_to_plot, np.nan)
                 padded[:len(var_data)] = var_data
                 return padded
         except KeyError:
@@ -3569,26 +3695,29 @@ def plot_dual_eof_comparison(dual_eof_results, fig_dir, num_modes_to_plot=10, so
     box_data_unrot = [unrot_ensemble[:, i][~np.isnan(unrot_ensemble[:, i])] for i in range(num_modes_to_plot)]
     bp_u           = ax.boxplot(box_data_unrot, positions=pos_unrot, patch_artist=True, widths=width * 0.8, showfliers=False)
     for patch in bp_u['boxes']:
-        patch.set_facecolor('#c9b2d6'); patch.set_alpha(0.6); patch.set_edgecolor('#7b4f9e')
+        patch.set_facecolor('#cccccc'); patch.set_alpha(0.5); patch.set_edgecolor('#555555')
     for element in ['medians', 'whiskers', 'caps']:
-        plt.setp(bp_u[element], color='#7b4f9e')
+        plt.setp(bp_u[element], color='#555555', linestyle='-')
     ax.plot(pos_unrot, mmm_unrot, color='black', marker='o', markersize=6, linestyle='None', zorder=4)
     if ref_unrot is not None:
-        ax.plot(pos_unrot, ref_unrot, color='green', marker='s', markersize=11, linestyle='None', zorder=5)
+        ax.plot(pos_unrot, ref_unrot, color='green', marker='s', markersize=7, linestyle='-', zorder=5)
+        ax.scatter(pos_unrot, ref_unrot, color='green', marker='s', s=49, edgecolors='black', linewidths=1, linestyle='-', facecolors='none', zorder=5)
 
     #rotated
     box_data_rot = [rot_ensemble[:, i][~np.isnan(rot_ensemble[:, i])] for i in range(num_modes_to_plot)]
     bp_r         = ax.boxplot(box_data_rot, positions=pos_rot, patch_artist=True, widths=width * 0.8, showfliers=False)
     for patch in bp_r['boxes']:
-        patch.set_facecolor('#fdbf6f'); patch.set_alpha(0.6); patch.set_edgecolor('#ff7f0e')
+        patch.set_facecolor('#cccccc'); patch.set_alpha(0.5); patch.set_edgecolor('#555555')
+        patch.set_linestyle('--')
     for element in ['medians', 'whiskers', 'caps']:
-        plt.setp(bp_r[element], color='#ff7f0e')
+        plt.setp(bp_r[element], color='#555555', linestyle='--')
     ax.plot(pos_rot, mmm_rot, color='black', marker='o', markersize=6, linestyle='None', zorder=4)
     if ref_rot is not None:
-        ax.plot(pos_rot, ref_rot, color='green', marker='s', markersize=11, linestyle='None', zorder=5)
+        ax.plot(pos_rot, ref_rot, color='green', marker='s', markersize=7, linestyle='--', zorder=5)
+        ax.scatter(pos_rot, ref_rot, color='green', marker='s', s=49, edgecolors='black', linewidths=1, linestyle='--', facecolors='none', zorder=5)
 
     #formatting
-    ax.set_title(f'Explained variance per mode: standard vs rotated\n{source.capitalize()} vs {len(model_keys)} {CMIP_VERSION} models', fontsize=14, fontweight='bold')
+    ax.set_title(f'Explained variance per mode: standard vs rotated\n{source.capitalize()} vs {len(model_keys)} {CMIP_VERSION} models', fontsize=16, fontweight='bold')
     ax.set_xlabel('Mode number', fontsize=12)
     ax.set_ylabel('Explained variance (%)', fontsize=12)
     ax.set_xticks(modes_idx)
@@ -3596,13 +3725,13 @@ def plot_dual_eof_comparison(dual_eof_results, fig_dir, num_modes_to_plot=10, so
     ax.grid(True, alpha=0.3)
 
     #legend
-    legend_handles = [Line2D([0], [0], color='#7b4f9e', marker='*', linestyle='None', markersize=11, label=f'Standard {source}'),
-                      Line2D([0], [0], color='#7b4f9e', marker='o', linestyle='None', markersize=6, label='Standard Multi-model mean'),
-                      Patch(facecolor='#c9b2d6', edgecolor='#7b4f9e', alpha=0.6, label='Standard spread'),
-                      Line2D([0], [0], color='#ff7f0e', marker='*', linestyle='None', markersize=11, label=f'Rotated {source}'),
-                      Line2D([0], [0], color='#ff7f0e', marker='o', linestyle='None', markersize=6, label='Rotated Multi-model mean'),
-                      Patch(facecolor='#fdbf6f', edgecolor='#ff7f0e', alpha=0.6, label='Rotated spread')]
-    ax.legend(handles=legend_handles, loc='upper right', ncol=2, fontsize=10, framealpha=0.9)
+    legend_handles = [Line2D([0], [0], color='green',   marker='s', linestyle='-',  markersize=7, linewidth=1.2, label=f'Standard {source}'),
+                      Line2D([0], [0], color='black',   marker='o', linestyle='-',  markersize=6, linewidth=1.2, label='Standard multi-model mean'),
+                      Patch(facecolor='#cccccc', edgecolor='#555555', alpha=0.5, linestyle='-',  label='Standard spread'),
+                      Line2D([0], [0], color='green',   marker='s', linestyle='--', markersize=7, linewidth=1.2, label=f'Rotated {source}'),
+                      Line2D([0], [0], color='black',   marker='o', linestyle='--', markersize=6, linewidth=1.2, label='Rotated multi-model mean'),
+                      Patch(facecolor='#cccccc', edgecolor='#555555', alpha=0.5, linestyle='--', label='Rotated spread')]
+    ax.legend(handles=legend_handles, loc='upper right', ncol=2, fontsize=14, framealpha=0.9)
 
     plt.tight_layout()
     fig.savefig(os.path.join(fig_dir, f'dual_eof_combined_variance_{source}.png'), dpi=300, bbox_inches='tight')
@@ -3660,7 +3789,7 @@ def plot_observed_vs_best_windows(obs_results, cmip_results, sliding_results, fi
     cmap_unified = cfg['cmap']
 
     #difference
-    diff_pcc = best_pcc_mmm - obs_data
+    diff_pcc  = best_pcc_mmm - obs_data
     diff_rmse = best_rmse_mmm - obs_data
     vmax_diff = max(abs(diff_pcc.quantile(0.98, skipna=True).item()), abs(diff_rmse.quantile(0.98, skipna=True).item()))
     vmin_diff = -vmax_diff
@@ -3704,7 +3833,7 @@ def plot_observed_vs_best_windows(obs_results, cmip_results, sliding_results, fi
     mesh_obs = obs_data.plot.contourf(ax=ax_obs, transform=ccrs.PlateCarree(), cmap=cmap_unified, vmin=vmin_unified, vmax=vmax_unified, add_colorbar=False, levels=levels_main, extend=extend_main)
     if obs_p_value is not None:
         ax_obs.contourf(obs_p_value.longitude, obs_p_value.latitude, obs_p_value < 0.05, levels=[0.5, 1.5], transform=ccrs.PlateCarree(), colors='none', hatches=['...'])
-    ax_obs.set_title(f'a) Observed ODSL ({cfg["name"]})\nMean: {stats_obs["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_obs["std_x"]:.2f} {cfg["units"]}', fontsize=11)
+    ax_obs.set_title(fr'$\bf{{a)\ Observed\ ODSL\ ({cfg["name"]})}}$'f'\nMean: {stats_obs["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_obs["std_x"]:.2f} {cfg["units"]}', fontsize=11)
 
     #b1) PCC multi-model mean
     add_map_features(ax_pcc, EXTENT, is_left=False, is_bottom=False)
@@ -3712,7 +3841,7 @@ def plot_observed_vs_best_windows(obs_results, cmip_results, sliding_results, fi
     if best_pcc_p_value is not None:
         ax_pcc.contourf(best_pcc_p_value.longitude, best_pcc_p_value.latitude, best_pcc_p_value < 0.05, levels=[0.5, 1.5], transform=ccrs.PlateCarree(), colors='none', hatches=['...'])
     ax_pcc.contour(snr_pcc.longitude, snr_pcc.latitude, snr_pcc, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
-    ax_pcc.set_title(f'b1) Best PCC window multi-model mean ({cfg["name"]})\nMean: {stats_pcc["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_pcc["std_x"]:.2f} {cfg["units"]}', fontsize=11)
+    ax_pcc.set_title(fr'$\bf{{b1)\ Best\ PCC\ window\ multi-model\ mean\ ({cfg["name"]})}}$'f'\nMean: {stats_pcc["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_pcc["std_x"]:.2f} {cfg["units"]}', fontsize=11)
 
     #b2) RMSE multi-model mean
     add_map_features(ax_rmse, EXTENT, is_left=False, is_bottom=True)
@@ -3720,29 +3849,29 @@ def plot_observed_vs_best_windows(obs_results, cmip_results, sliding_results, fi
     if best_rmse_p_value is not None:
         ax_rmse.contourf(best_rmse_p_value.longitude, best_rmse_p_value.latitude, best_rmse_p_value < 0.05, levels=[0.5, 1.5], transform=ccrs.PlateCarree(), colors='none', hatches=['...'])
     ax_rmse.contour(snr_rmse.longitude, snr_rmse.latitude, snr_rmse, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
-    ax_rmse.set_title(f'b2) Best RMSE window multi-model mean ({cfg["name"]})\nMean: {stats_rmse["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_rmse["std_x"]:.2f} {cfg["units"]}', fontsize=11)
+    ax_rmse.set_title(fr'$\bf{{b2)\ Best\ RMSE\ window\ multi-model\ mean\ ({cfg["name"]})}}$'f'\nMean: {stats_rmse["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_rmse["std_x"]:.2f} {cfg["units"]}', fontsize=11)
 
     #c1) difference (PCC - obs)
     add_map_features(ax_diff_pcc, EXTENT, is_left=False, is_bottom=False)
     mesh_d_pcc = diff_pcc.plot.contourf(ax=ax_diff_pcc, transform=ccrs.PlateCarree(), cmap=cmap_diff, vmin=vmin_diff, vmax=vmax_diff, add_colorbar=False, levels=levels_diff, extend='both')
     ax_diff_pcc.contour(snr_diff_pcc.longitude, snr_diff_pcc.latitude, snr_diff_pcc, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
-    ax_diff_pcc.set_title(f'c1) Difference (b1 - a)\nMean: {stats_diff_pcc["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_diff_pcc["std_x"]:.2f} {cfg["units"]}', fontsize=11)
+    ax_diff_pcc.set_title(fr'$\bf{{c1)\ Difference\ (b1 - a)}}$'f'\nMean: {stats_diff_pcc["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_diff_pcc["std_x"]:.2f} {cfg["units"]}', fontsize=11)
 
     #c2) difference (RMSE - obs)
     add_map_features(ax_diff_rmse, EXTENT, is_left=False, is_bottom=True)
     mesh_d_rmse = diff_rmse.plot.contourf(ax=ax_diff_rmse, transform=ccrs.PlateCarree(), cmap=cmap_diff, vmin=vmin_diff, vmax=vmax_diff, add_colorbar=False, levels=levels_diff, extend='both')
     ax_diff_rmse.contour(snr_diff_rmse.longitude, snr_diff_rmse.latitude, snr_diff_rmse, levels=[1.0, 1.5, 2.0], colors=['black', 'gray', 'white'], linewidths=1.0, transform=ccrs.PlateCarree())
-    ax_diff_rmse.set_title(f'c2) Difference (b2 - a)\nMean: {stats_diff_rmse["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_diff_rmse["std_x"]:.2f} {cfg["units"]}', fontsize=11)
+    ax_diff_rmse.set_title(fr'$\bf{{c2)\ Difference\ (b2 - a)}}$'f'\nMean: {stats_diff_rmse["mean_x"]:.2f} {cfg["units"]} | RMS: {stats_diff_rmse["std_x"]:.2f} {cfg["units"]}', fontsize=11)
 
     #overall title
-    title_str = (f'Observed vs. best window multi-model means ({START_YEAR}-{END_YEAR})\nb1) PCC = {stats_pcc["pcc"]:.2f}, RMSE = {stats_pcc["rmse"]:.2f} {cfg["units"]}')
+    title_str = (fr'$\bf{{Observed\ vs.\ best\ window\ multi-model\ means\ ({START_YEAR}-{END_YEAR})}}$'f'\nb1) PCC = {stats_pcc["pcc"]:.2f}, RMSE = {stats_pcc["rmse"]:.2f} {cfg["units"]}')
     #sign agreement if not variability (variability \geq 0)
     if plot_var != 'variability':
         title_str += f', Sign agreement = {stats_pcc["sign_agreement"]:.0%}'
     title_str += f' | b2) PCC = {stats_rmse["pcc"]:.2f}, RMSE = {stats_rmse["rmse"]:.2f} {cfg["units"]}'
     if plot_var != 'variability':
         title_str += f', Sign agreement = {stats_rmse["sign_agreement"]:.0%}'
-    fig.suptitle(title_str, fontsize=14, y=0.96, fontweight='bold')
+    fig.suptitle(title_str, fontsize=14, y=0.96)
 
     #colorbar
     pos_obs = ax_obs.get_position()
@@ -3815,20 +3944,20 @@ def plot_all_models_overview_best_windows(cmip_results, sliding_results, fig_dir
         best_year = best_years.sel(model=model_name).item()
 
         if plot_var == 'trend':
-            full_ts = cmip_results['full_timeseries'].sel(model=model_name)
+            full_ts     = cmip_results['full_timeseries'].sel(model=model_name)
             window_data = full_ts.sel(time=slice(best_year, best_year + window_size - 1))
-            sig = compute_field_significance(window_data, plot_var)
-            pattern = sig['field']
+            sig         = compute_field_significance(window_data, plot_var)
+            pattern     = sig['field']
         else:
             window_data = cmip_results['full_timeseries'].sel(model=model_name, time=slice(best_year, best_year + window_size - 1))
-            pattern = sliding_maps.sel(model=model_name, window_start_year=best_year)
-            sig = compute_field_significance(window_data, plot_var)
+            pattern     = sliding_maps.sel(model=model_name, window_start_year=best_year)
+            sig         = compute_field_significance(window_data, plot_var)
 
         best_patterns.append(pattern)
         best_p_values.append(sig.get('p_value', None))
 
     models_stack = xr.concat(best_patterns, dim=pd.Index(model_names, name='model'))
-    n_models = len(model_names)
+    n_models     = len(model_names)
 
     #color limits
     if plot_var == 'trend' or plot_var == 'ODSL':
@@ -3848,7 +3977,7 @@ def plot_all_models_overview_best_windows(cmip_results, sliding_results, fig_dir
     proj = ccrs.AlbersEqualArea(central_longitude=PROJECTION_PARAMS['central_longitude'], central_latitude=PROJECTION_PARAMS['central_latitude'], standard_parallels=PROJECTION_PARAMS['standard_parallels'])
 
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(18, 22), subplot_kw={'projection': proj})
-    axes = axes.flatten()
+    axes      = axes.flatten()
 
     region_mask = create_region_mask(models_stack.isel(model=0), EXTENT)
 
@@ -3857,23 +3986,23 @@ def plot_all_models_overview_best_windows(cmip_results, sliding_results, fig_dir
         if i < n_models:
             model_name = model_names[i]
             data_model = models_stack.sel(model=model_name)
-            best_year = best_years.sel(model=model_name).item()
+            best_year  = best_years.sel(model=model_name).item()
 
             #stats against observed reference
-            stats = calculate_weighted_stats(data_model, region_mask, data_y=obs_ref)
-            pcc = stats['pcc']
-            rmse = stats['rmse']
+            stats          = calculate_weighted_stats(data_model, region_mask, data_y=obs_ref)
+            pcc            = stats['pcc']
+            rmse           = stats['rmse']
             sign_agreement = stats['sign_agreement']
 
             #axes
-            row_idx = i // ncols
-            col_idx = i % ncols
-            is_left = (col_idx == 0)
+            row_idx   = i // ncols
+            col_idx   = i % ncols
+            is_left   = (col_idx == 0)
             is_bottom = (row_idx == nrows - 1) or (i + ncols >= n_models)
 
             add_map_features(ax, EXTENT, is_left=is_left, is_bottom=is_bottom)
             plot_handle = data_model.plot.contourf(ax=ax, transform=ccrs.PlateCarree(), cmap=cmap_unified, levels=levels, vmin=vmin_val, vmax=vmax_val, add_colorbar=False, extend=extend)
-            p_val_map = best_p_values[i]
+            p_val_map   = best_p_values[i]
             if p_val_map is not None:
                 x_coord = p_val_map.longitude if 'longitude' in p_val_map.coords else p_val_map.lon
                 y_coord = p_val_map.latitude if 'latitude' in p_val_map.coords else p_val_map.lat
@@ -3903,13 +4032,13 @@ def plot_all_models_overview_best_windows(cmip_results, sliding_results, fig_dir
     eof_label = f'Best {metric_label} window'
     fig.suptitle(f"Individual model performance: {cfg['name']} (best {metric_label} window per model)", fontsize=20, fontweight='bold', y=0.95)
 
-    filename = f'all_models_overview_best_{metric}_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'
+    filename    = f'all_models_overview_best_{metric}_{cfg["name"]}_{START_YEAR}_{END_YEAR}.png'
     output_path = os.path.join(fig_dir, filename)
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
 
 def plot_spectral_analysis(spectral_results, fig_dir, n_modes=5):
-    """Plot power spectra: left column altimetry era (1993-2024) and right CMIP model historical period (1850-2024)."""
+    """Plot power spectra: left column CMIP historical (1850-2024), right column altimetry era (1993-2024)."""
 
     print("Plotting spectral analysis...")
     print(f"Available keys: {list(spectral_results.keys())}")
@@ -3924,32 +4053,71 @@ def plot_spectral_analysis(spectral_results, fig_dir, n_modes=5):
     available_modes = model_spectra.mode.values
     plot_modes      = available_modes[:n_modes]
 
-    subplot_height = 3.5
+    subplot_height = 3.8
     fig_height     = len(plot_modes) * subplot_height
-    fig, axes = plt.subplots(nrows=len(plot_modes), ncols=2, figsize=(18, fig_height), gridspec_kw={'width_ratios': [2, 3], 'wspace': 0.02}, sharey='row')    
+    fig, axes = plt.subplots(nrows=len(plot_modes), ncols=2, figsize=(18, fig_height), gridspec_kw={'width_ratios': [3, 2], 'wspace': 0.02, 'hspace': 0.45}, sharey=False)
     if len(plot_modes) == 1:
         axes = axes.reshape(1, -1)
 
     for idx, mode in enumerate(plot_modes):
+        periods   = None
         periods_r = None
-        periods = None
 
-        ax_obs  = axes[idx, 0]
-        ax_full = axes[idx, 1]
-        subplot_letter_l = chr(97 + idx)              
-        subplot_letter_r = chr(97 + len(plot_modes) + idx) 
+        ax_full = axes[idx, 0]   
+        ax_obs  = axes[idx, 1]   
+        subplot_letter_l = chr(97 + idx)
+        subplot_letter_r = chr(97 + len(plot_modes) + idx)
 
-        #left column altimetry era (1993-2024)
+        #historical model period (1850-2024)
+        full_modes = model_spectra.mode.values
+        if idx >= len(full_modes):
+            ax_full.set_visible(False)
+            ax_obs.set_visible(False)
+            continue
+        full_mode = full_modes[idx]
+
+        is_first = True
+        for model_name in model_spectra.model.values:
+            spec_da = model_spectra.sel(model=model_name, mode=full_mode).dropna('frequency')
+            freqs   = spec_da.frequency.values
+            mask    = freqs > 0
+            periods = 1.0 / freqs[mask]
+            label   = 'Individual models' if is_first else ''
+            ax_full.loglog(periods, spec_da.values[mask], color='lightgrey', linewidth=0.8, label=label, zorder=1)
+            is_first = False
+
+        mmm_da      = mmm_spectrum.sel(mode=full_mode).dropna('frequency')
+        freqs_mmm   = mmm_da.frequency.values
+        mask_mmm    = freqs_mmm > 0
+        freqs_pos   = freqs_mmm[mask_mmm]
+        power_pos   = mmm_da.values[mask_mmm]
+        total_power = np.trapz(power_pos, freqs_pos)
+        long_mask   = freqs_pos < 1.0 / 32.0
+        pct_long    = 100 * np.trapz(power_pos[long_mask], freqs_pos[long_mask]) / total_power if long_mask.sum() > 1 else np.nan  # type: ignore
+        ax_full.loglog(1.0 / freqs_mmm[mask_mmm], mmm_da.values[mask_mmm], color='black', linewidth=2.5, label='Multi-model mean', zorder=3)
+
+        ax_full.axvline(32, color='green', linestyle='--', linewidth=1.2, alpha=0.8, zorder=2, label='32-yr window')
+
+        ax_full.set_title(f'{subplot_letter_l}) EOF mode {idx + 1} (1850-{END_YEAR})', fontweight='bold', fontsize=11, pad=22)
+        ax_full.text(0.5, 1.02, f'{pct_long:.0f}% of multi-model mean power at periods > 32 yr', transform=ax_full.transAxes, ha='center', va='bottom', fontsize=10, fontweight='normal')
+        ax_full.axhline(1, color='black', linestyle=':', linewidth=1.2, alpha=0.8, zorder=2, label=f'PSD = 1')
+        ax_full.set_ylabel('Power spectral density')
+        ax_full.grid(True, linestyle='--', alpha=0.4, which='both', axis='x')
+        if periods is not None:
+            ax_full.set_xlim(periods.min(), periods.max())
+        if idx == 0:
+            ax_full.legend(loc='lower right', fontsize=9)
+
+        #altimetry era (1993-2024)
         if has_obs_period:
             obs_p_model = spectral_results['obs_period_model_spectra']
             obs_p_mmm   = spectral_results['obs_period_mmm_spectrum']
 
             obs_p_modes = obs_p_model.mode.values
-            if idx < len(obs_p_modes):
-                obs_mode = obs_p_modes[idx]
-            else:
+            if idx >= len(obs_p_modes):
                 ax_obs.set_visible(False)
                 continue
+            obs_mode = obs_p_modes[idx]
 
             is_first = True
             for model_name in obs_p_model.model.values:
@@ -3962,11 +4130,10 @@ def plot_spectral_analysis(spectral_results, fig_dir, n_modes=5):
                 ax_obs.loglog(periods_r, power, color='lightgrey', linewidth=0.8, label=label, zorder=1)
                 is_first = False
 
-            mmm_da      = obs_p_mmm.sel(mode=obs_mode).dropna('frequency_obs')
-            freqs_mmm   = mmm_da.frequency_obs.values
-            mask_mmm    = freqs_mmm > 0
-            periods_mmm = 1.0 / freqs_mmm[mask_mmm]
-            ax_obs.loglog(periods_mmm, mmm_da.values[mask_mmm], color='black', linewidth=2.5, label='Multi-model mean', zorder=3)
+            mmm_da_r    = obs_p_mmm.sel(mode=obs_mode).dropna('frequency_obs')
+            freqs_mmm_r = mmm_da_r.frequency_obs.values
+            mask_mmm_r  = freqs_mmm_r > 0
+            ax_obs.loglog(1.0 / freqs_mmm_r[mask_mmm_r], mmm_da_r.values[mask_mmm_r], color='black', linewidth=2.5, label='Multi-model mean', zorder=3)
 
         if has_obs:
             obs_spectrum    = spectral_results['obs_spectrum']
@@ -3977,9 +4144,13 @@ def plot_spectral_analysis(spectral_results, fig_dir, n_modes=5):
                 obs_mask  = obs_freqs > 0
                 ax_obs.loglog(1.0 / obs_freqs[obs_mask], obs_da.values[obs_mask], color='green', linewidth=2, label='Observed', zorder=2)
 
-        ax_obs.set_title(f'{subplot_letter_l}) EOF mode {idx + 1} ({START_YEAR}-{END_YEAR})', fontweight='bold', fontsize=11)
-        ax_obs.set_ylabel('Power spectral density')
+        ax_obs.set_title(f'{subplot_letter_r}) EOF mode {idx + 1} ({START_YEAR}-{END_YEAR})', fontweight='bold', fontsize=11, pad=22)
+        ax_obs.axhline(1, color='black', linestyle=':', linewidth=1.2, alpha=0.8, zorder=2, label=f'PSD = 1')
         ax_obs.grid(True, linestyle='--', alpha=0.4, which='both', axis='x')
+        ax_obs.yaxis.tick_right()
+        ax_obs.yaxis.set_label_position('right')
+        ax_obs.set_ylabel('Power spectral density')
+        ax_obs.tick_params(axis='y', length=4, which='both')
         if periods_r is not None:
             ax_obs.set_xlim(periods_r.min(), periods_r.max())
         if idx == 0:
@@ -3988,44 +4159,13 @@ def plot_spectral_analysis(spectral_results, fig_dir, n_modes=5):
             spine.set_edgecolor('green')
             spine.set_linewidth(2.0)
 
-        #right column historical model period (1850-2024)
-        full_modes = model_spectra.mode.values
-        if idx < len(full_modes):
-            full_mode = full_modes[idx]
-        else:
-            ax_full.set_visible(False)
-            continue
-
-        is_first = True
-        for model_name in model_spectra.model.values:
-            spec_da = model_spectra.sel(model=model_name, mode=full_mode).dropna('frequency')
-            freqs   = spec_da.frequency.values
-            mask    = freqs > 0
-            periods = 1.0 / freqs[mask]
-            label   = 'Individual models' if is_first else ''
-            ax_full.loglog(periods, spec_da.values[mask], color='lightgrey', linewidth=0.8, label=label, zorder=1)
-            is_first = False
-
-        mmm_da    = mmm_spectrum.sel(mode=full_mode).dropna('frequency')
-        freqs_mmm = mmm_da.frequency.values
-        mask_mmm  = freqs_mmm > 0
-        ax_full.loglog(1.0 / freqs_mmm[mask_mmm], mmm_da.values[mask_mmm], color='black', linewidth=2.5, label='Multi-model mean', zorder=3)
-
-        ax_full.set_title(f'{subplot_letter_r}) EOF mode {idx + 1} (1850-{END_YEAR})', fontweight='bold', fontsize=11)
-        ax_full.grid(True, linestyle='--', alpha=0.4, which='both', axis='x')
-        ax_full.tick_params(axis='y', labelleft=False, length=4, which='both')
-        ax_full.spines['left'].set_visible(True)
-        if periods is not None:
-            ax_full.set_xlim(periods.min(), periods.max())
-        if idx == 0:
-            ax_full.legend(loc='lower right', fontsize=9)
-
     axes[-1, 0].set_xlabel('Period (years)')
     axes[-1, 1].set_xlabel('Period (years)')
 
     eof_label = 'Rotated EOF' if USE_ROTATED_EOF else 'Regular EOF'
-    fig.suptitle(f'Power spectra of leading {eof_label} modes', fontsize=16, fontweight='bold', y=0.92)
-    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.suptitle(f'Power spectra of leading {eof_label} modes', fontsize=16, fontweight='bold', y=0.94)
+    plt.tight_layout(rect=(0, 0, 1, 0.95))
+    plt.subplots_adjust(hspace=0.55)
 
     output_path = os.path.join(fig_dir, 'eof_power_spectra.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
